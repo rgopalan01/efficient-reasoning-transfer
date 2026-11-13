@@ -1,0 +1,71 @@
+schema_version: "1"
+experiment:
+  name: efficiency
+  phase: pilot
+  seed: 11
+  condition: efficiency
+model:
+  id: Qwen/Qwen3-4B-Thinking-2507
+  revision: 768f209d9ea81521153ed38c47d515654e938aea
+  dtype: bfloat16
+  quantization: none
+  attention_implementation: null
+adapter:
+  method: lora
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+data:
+  output_dir: data/generated/pilot
+  manifest: data/generated/pilot/manifest.json
+  train_manifest: data/generated/pilot/manifest.json
+  eval_manifest: data/generated/pilot/manifest.json
+  max_generation_attempts: 2000
+  variants_for_splits: [dev, test]
+  splits:
+    train: {count: 16, n_people: 3, depth: 2, width: 2}
+    dev: {count: 6, n_people: 3, depth: 2, width: 2}
+    test: {count: 0, n_people: 3, depth: 2, width: 2}
+    test_harder: {count: 2, n_people: 4, depth: 2, width: 2}
+reward:
+  gamma: 0.2
+  completion_budget: 4096
+generation:
+  temperature: 0.6
+  top_p: 0.95
+  top_k: 20
+  max_new_tokens: 4096
+  do_sample: true
+training:
+  num_generations: 4
+  loss_type: dr_grpo
+  scale_rewards: false
+  beta: 0.0
+  learning_rate: 0.000005
+  max_steps: 5
+  gradient_checkpointing: true
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 1
+  save_steps: 5
+  logging_steps: 1
+  warmup_ratio: 0.0
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  optim: adamw_torch_fused
+  lr_scheduler_type: linear
+  epsilon: 0.2
+  epsilon_high: 0.2
+  mask_truncated_completions: false
+  seed: 11
+evaluation:
+  samples_per_example: 1
+  prompt_variant: standard
+  seed: 101
+analysis:
+  bootstrap_resamples: 10000
+  confidence: 0.95
+  accuracy_margin_pp: 5.0
+  seed: 17
+artifacts:
+  output_dir: runs/efficiency_seed11_pilot

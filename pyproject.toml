@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "efficient-reasoning-transfer"
+version = "0.1.0"
+description = "Controlled RLVR study of reasoning efficiency and cognitive flexibility."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Rishikumar Gopalan"}]
+dependencies = [
+  "matplotlib>=3.9,<4",
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<4",
+  "PyYAML>=6.0.2,<7",
+  "reasoning-gym==0.1.25",
+]
+
+[project.optional-dependencies]
+train = [
+  "accelerate>=1.15,<1.16",
+  "datasets>=5.1,<5.2",
+  "peft>=0.21.2,<0.22",
+  "torch>=2.14,<2.15",
+  "transformers>=5.20.2,<5.21",
+  "trl>=1.16,<1.17",
+]
+dev = [
+  "nbformat>=5.10,<6",
+  "pytest>=8.3,<10",
+  "ruff>=0.14,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/effreason"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+markers = ["gpu: requires a CUDA GPU and the training dependencies"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+exclude = ["notebooks/*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
