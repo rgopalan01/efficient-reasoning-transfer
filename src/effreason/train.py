@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 import traceback
 from collections import Counter
 from pathlib import Path
@@ -16,7 +17,9 @@ from .utils import (
     atomic_write_yaml,
     canonical_json,
     environment_manifest,
+    format_duration,
     load_config,
+    log_progress,
     resolve_path,
     sha256_path,
     sha256_text,
@@ -209,6 +212,14 @@ def run_training(args: argparse.Namespace) -> None:
         resolved.path, config["data"].get("train_manifest") or config["data"]["manifest"]
     )
     data_manifest, records = load_manifest_records(data_manifest_path, "train")
+    log_progress(
+        "train",
+        (
+            f"dataset ready: records={len(records)}, condition={config['experiment']['condition']}, "
+            f"steps={config['training']['max_steps']}, generations_per_prompt="
+            f"{config['training']['num_generations']}"
+        ),
+    )
     manifest: dict[str, Any] = {
         "schema_version": "1",
         "run_id": output_dir.name,
@@ -226,8 +237,19 @@ def run_training(args: argparse.Namespace) -> None:
     }
     atomic_write_json(manifest_path, manifest)
     try:
+        setup_started = time.perf_counter()
+        log_progress("train", "loading training libraries")
         dataset_class, grpo_config_class, trainer_class = _training_imports()
+        log_progress(
+            "train",
+            f"loading base model {config['model']['id']} (the first run may download about 8 GB)",
+        )
         model, tokenizer = load_policy(config["model"])
+        log_progress(
+            "train",
+            f"base model ready after {format_duration(time.perf_counter() - setup_started)}",
+        )
+        log_progress("train", "freezing base weights and attaching LoRA adapters")
         model = attach_lora(model, config["adapter"])
         manifest["chat_template_hash"] = sha256_text(tokenizer.chat_template)
         manifest["trainable_parameters"] = trainable_parameter_summary(model)
@@ -265,6 +287,7 @@ def run_training(args: argparse.Namespace) -> None:
             remove_unused_columns=False,
             report_to="none",
             bf16=True,
+            disable_tqdm=False,
         )
         reward_adapter = TrlRewardAdapter(
             budget=int(config["reward"]["completion_budget"]),
@@ -278,7 +301,20 @@ def run_training(args: argparse.Namespace) -> None:
             args=trainer_args,
             train_dataset=dataset,
         )
+        log_progress(
+            "train",
+            (
+                f"starting GRPO: {training['max_steps']} steps; TRL will report step progress "
+                "and metrics below"
+            ),
+        )
+        training_started = time.perf_counter()
         trainer.train(resume_from_checkpoint=args.resume)
+        log_progress(
+            "train",
+            f"optimization complete after {format_duration(time.perf_counter() - training_started)}",
+        )
+        log_progress("train", f"saving adapter to {output_dir / 'adapter'}")
         trainer.save_model(str(output_dir / "adapter"))
         manifest["adapter_hash"] = sha256_path(output_dir / "adapter")
         metrics = [
@@ -287,8 +323,17 @@ def run_training(args: argparse.Namespace) -> None:
         atomic_write_jsonl(output_dir / "metrics.jsonl", metrics)
         manifest["hardware"] = gpu_hardware()
         _write_status(manifest_path, manifest, "completed")
+        log_progress("train", f"complete: adapter and metrics saved under {output_dir}")
+    except KeyboardInterrupt:
+        _write_status(manifest_path, manifest, "interrupted")
+        log_progress(
+            "train",
+            "interrupted; rerun with --resume pointing to the latest saved checkpoint",
+        )
+        raise
     except Exception as error:
         _write_status(manifest_path, manifest, "failed", "".join(traceback.format_exception_only(error)))
+        log_progress("train", f"failed: {error}")
         raise
 
 

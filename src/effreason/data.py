@@ -12,6 +12,7 @@ from .utils import (
     atomic_write_json,
     atomic_write_jsonl,
     load_config,
+    log_progress,
     read_jsonl,
     resolve_path,
     sha256_file,
@@ -372,11 +373,15 @@ def build_records(config: dict[str, Any]) -> tuple[list[PuzzleRecord], dict[str,
     records: list[PuzzleRecord] = []
     rejection_counts: Counter[str] = Counter()
     source_index = 0
+    total_target = sum(int(item["count"]) for item in config["data"]["splits"].values())
+    total_accepted = 0
+    log_progress("data", f"generation started: target={total_target} puzzle families")
 
     for split, split_config in config["data"]["splits"].items():
         target = int(split_config["count"])
         accepted = 0
         attempts = 0
+        log_progress("data", f"split={split}: target={target} families")
         while accepted < target and attempts < max_attempts:
             attempts += 1
             source_index += 1
@@ -461,10 +466,26 @@ def build_records(config: dict[str, Any]) -> tuple[list[PuzzleRecord], dict[str,
             accepted_hashes.update(family_hashes)
             records.extend(family)
             accepted += 1
+            total_accepted += 1
+            log_progress(
+                "data",
+                (
+                    f"accepted family {total_accepted}/{total_target}; split={split} "
+                    f"{accepted}/{target}; attempts_in_split={attempts}; records={len(records)}"
+                ),
+            )
         if accepted < target:
             raise RuntimeError(
                 f"Could only construct {accepted}/{target} families for {split} after {attempts} attempts"
             )
+        log_progress(
+            "data",
+            f"split={split} complete: accepted={accepted}, attempts={attempts}",
+        )
+    log_progress(
+        "data",
+        f"generation complete: families={total_accepted}, records={len(records)}",
+    )
     return records, dict(sorted(rejection_counts.items()))
 
 
@@ -502,6 +523,10 @@ def write_dataset(
             "records": len(split_records),
             "families": len({record.family_id for record in split_records}),
         }
+        log_progress(
+            "data",
+            f"wrote split={split}: records={len(split_records)} to {path}",
+        )
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "created_at": utc_now(),
@@ -667,19 +692,23 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
     if args.command == "build":
+        log_progress("data", f"loading configuration {args.config}")
         resolved = load_config(args.config)
         records, rejections = build_records(resolved.values)
         manifest_path = write_dataset(
             resolved.path, resolved.values, records, rejections, force=args.force
         )
+        log_progress("data", f"auditing manifest {manifest_path}")
         summary = audit_manifest(manifest_path)
-        print(f"Wrote and audited {manifest_path}: {summary}")
+        log_progress("data", f"build and audit complete: {summary}")
     elif args.command == "audit":
+        log_progress("data", f"auditing manifest {args.manifest}")
         summary = audit_manifest(args.manifest)
-        print(summary)
+        log_progress("data", f"audit complete: {summary}")
     else:
+        log_progress("data", f"freezing manifest {args.manifest}")
         manifest = freeze_manifest(args.manifest)
-        print(f"Frozen {args.manifest} with dataset hash {manifest['dataset_hash']}")
+        log_progress("data", f"frozen with dataset hash {manifest['dataset_hash']}")
 
 
 if __name__ == "__main__":

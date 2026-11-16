@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import subprocess
@@ -106,6 +107,25 @@ class ResolvedConfig:
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def format_duration(seconds: float) -> str:
+    """Render a non-negative duration compactly for CLI progress messages."""
+    if not math.isfinite(seconds) or seconds < 0:
+        return "unknown"
+    rounded = round(seconds)
+    hours, remainder = divmod(rounded, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def log_progress(component: str, message: str) -> None:
+    """Emit an immediately visible, Colab-friendly progress line."""
+    print(f"[{component}] {message}", flush=True)
 
 
 def canonical_json(value: Any) -> str:

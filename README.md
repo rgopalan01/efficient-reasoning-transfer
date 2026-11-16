@@ -180,6 +180,12 @@ Frozen manifests cannot be replaced by `data build --force`. Main training rejec
 
 Every prediction retains the raw completion, parsed answer, exact token count, correctness, finish reason, truncation, latency, reward components, and variant linkage. Evaluation resumes only when its configuration, dataset, split, prompt variant, condition, and adapter identity match.
 
+Long-running commands emit Colab-friendly progress lines. Evaluation reports every completion with
+completed/total counts, remaining work, token count, latency, elapsed time, and ETA. Dataset builds
+report every accepted family, TRL reports every configured training step, and analysis announces
+each bootstrap comparison and figure. Interrupting evaluation preserves all atomically written
+predictions; rerun the identical command to resume them.
+
 ```bash
 python -m effreason.analyze \
   --run-dirs runs/accuracy_seed11_test runs/efficiency_seed11_test \

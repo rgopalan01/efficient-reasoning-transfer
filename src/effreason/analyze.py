@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from .utils import atomic_write_json, atomic_write_jsonl, read_jsonl, sha256_object
+from .utils import atomic_write_json, atomic_write_jsonl, log_progress, read_jsonl, sha256_object
 
 
 def _quantile(values: list[float], probability: float) -> float | None:
@@ -416,8 +416,10 @@ def analyze_runs(
     seed: int,
     training_run_dirs: list[Path] | None = None,
 ) -> dict[str, Any]:
+    log_progress("analyze", f"loading {len(run_dirs)} evaluation runs")
     runs = [_load_run(path) for path in run_dirs]
     _validate_comparable(runs)
+    log_progress("analyze", "run compatibility checks passed")
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
     for run_dir, (manifest, _, rows) in zip(run_dirs, runs, strict=True):
@@ -427,6 +429,10 @@ def analyze_runs(
     if len(runs) >= 2:
         reference_rows = runs[0][2]
         for index in range(1, len(runs)):
+            log_progress(
+                "analyze",
+                f"comparison {index}/{len(runs) - 1}: accuracy bootstrap ({resamples} resamples)",
+            )
             rows = runs[index][2]
             transfer_reference, transfer_rows = _complete_transfer_rows(reference_rows, rows)
             accuracy_comparison = clustered_bootstrap_difference(
@@ -437,6 +443,10 @@ def analyze_runs(
                 confidence=confidence,
                 seed=seed,
             )
+            log_progress(
+                "analyze",
+                f"comparison {index}/{len(runs) - 1}: token bootstrap ({resamples} resamples)",
+            )
             token_comparison = clustered_bootstrap_difference(
                 reference_rows,
                 rows,
@@ -446,6 +456,23 @@ def analyze_runs(
                 seed=seed + 1,
             )
             mean_reference_tokens = results[0]["metrics"]["completion_tokens"]["mean"]
+            premise_contrast = None
+            if transfer_reference:
+                log_progress(
+                    "analyze",
+                    (
+                        f"comparison {index}/{len(runs) - 1}: transfer bootstrap "
+                        f"({resamples} resamples)"
+                    ),
+                )
+                premise_contrast = clustered_bootstrap_difference(
+                    transfer_reference,
+                    transfer_rows,
+                    value=_transfer_contrast,
+                    resamples=resamples,
+                    confidence=confidence,
+                    seed=seed + 2,
+                )
             comparisons.append(
                 {
                     "a": results[0]["label"],
@@ -456,20 +483,10 @@ def analyze_runs(
                     "token_reduction_percent": (
                         -100 * token_comparison["difference_b_minus_a"] / mean_reference_tokens
                     ),
-                    "premise_minus_surface_contrast": (
-                        clustered_bootstrap_difference(
-                            transfer_reference,
-                            transfer_rows,
-                            value=_transfer_contrast,
-                            resamples=resamples,
-                            confidence=confidence,
-                            seed=seed + 2,
-                        )
-                        if transfer_reference
-                        else None
-                    ),
+                    "premise_minus_surface_contrast": premise_contrast,
                 }
             )
+            log_progress("analyze", f"comparison {index}/{len(runs) - 1} complete")
     summary = {"schema_version": "1", "runs": results, "comparisons": comparisons}
     atomic_write_json(output_dir / "summary.json", summary)
     table_rows = [
@@ -485,13 +502,17 @@ def analyze_runs(
         for result in results
     ]
     pd.DataFrame(table_rows).to_csv(output_dir / "metrics.csv", index=False)
+    log_progress("analyze", "rendering figure 1/3: accuracy versus length")
     _figure_accuracy_length(results, output_dir / "accuracy_vs_length.png")
+    log_progress("analyze", "rendering figure 2/3: accuracy and paired metrics")
     _figure_pair_metrics(results, output_dir / "accuracy_and_pairs.png")
+    log_progress("analyze", "rendering figure 3/3: training curves")
     _figure_training_curves(training_run_dirs or run_dirs, output_dir / "training_curves.png")
     if len(runs) >= 2:
         trace_rows, codebook = _trace_sample(runs, maximum_families=30, seed=seed)
         atomic_write_jsonl(output_dir / "trace_sample.jsonl", trace_rows)
         atomic_write_json(output_dir / "trace_codebook.json", codebook)
+    log_progress("analyze", f"complete: outputs saved to {output_dir}")
     return summary
 
 

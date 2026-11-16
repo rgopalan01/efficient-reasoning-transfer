@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,9 @@ from .utils import (
     atomic_write_yaml,
     canonical_json,
     environment_manifest,
+    format_duration,
     load_config,
+    log_progress,
     read_jsonl,
     resolve_path,
     sha256_file,
@@ -137,18 +140,53 @@ def run_evaluation(args: argparse.Namespace) -> None:
     by_id = {record.example_id: record for record in records}
     execution_records = list(records)
     random.Random(int(config["evaluation"]["seed"])).shuffle(execution_records)
+    samples = int(config["evaluation"]["samples_per_example"])
+    total_predictions = len(execution_records) * samples
+    completed_count = len(completed)
+    if completed_count > total_predictions:
+        raise ValueError(
+            f"Resume state has {completed_count} predictions, expected at most {total_predictions}"
+        )
+    log_progress(
+        "evaluate",
+        (
+            f"dataset ready: split={split}, records={len(execution_records)}, "
+            f"samples_per_record={samples}, total={total_predictions}, "
+            f"already_completed={completed_count}"
+        ),
+    )
     try:
+        load_started = time.perf_counter()
+        log_progress(
+            "evaluate",
+            f"loading {config['model']['id']} (the first run may download about 8 GB)",
+        )
         model, tokenizer = load_policy(config["model"], adapter_path=adapter)
+        log_progress(
+            "evaluate",
+            f"model ready after {format_duration(time.perf_counter() - load_started)}",
+        )
         manifest["chat_template_hash"] = sha256_text(tokenizer.chat_template)
         manifest["hardware"] = gpu_hardware()
+        manifest["total_predictions"] = total_predictions
+        manifest["completed_predictions"] = completed_count
         atomic_write_json(output_dir / "manifest.json", manifest)
-        samples = int(config["evaluation"]["samples_per_example"])
         base_seed = int(config["evaluation"]["seed"])
+        generation_started = time.perf_counter()
+        starting_completed = completed_count
         for record_index, record in enumerate(execution_records):
             for sample_id in range(samples):
                 key = (output_dir.name, record.example_id, sample_id)
                 if key in completed:
                     continue
+                log_progress(
+                    "evaluate",
+                    (
+                        f"starting {completed_count + 1}/{total_predictions}: "
+                        f"variant={record.variant_type}, sample={sample_id + 1}/{samples}, "
+                        f"example={record.example_id[:12]}"
+                    ),
+                )
                 result = generate_completion(
                     model,
                     tokenizer,
@@ -201,16 +239,53 @@ def run_evaluation(args: argparse.Namespace) -> None:
                     }
                 )
                 atomic_write_jsonl(output_dir / "predictions.jsonl", predictions)
+                completed.add(key)
+                completed_count += 1
+                completed_this_process = completed_count - starting_completed
+                elapsed = time.perf_counter() - generation_started
+                average = elapsed / completed_this_process
+                remaining = total_predictions - completed_count
+                manifest["completed_predictions"] = completed_count
+                manifest["updated_at"] = utc_now()
+                atomic_write_json(output_dir / "manifest.json", manifest)
+                log_progress(
+                    "evaluate",
+                    (
+                        f"completed {completed_count}/{total_predictions}; remaining={remaining}; "
+                        f"tokens={result.completion_tokens}; correct={score.correct}; "
+                        f"finish={result.finish_reason}; "
+                        f"item_time={format_duration(result.latency_seconds)}; "
+                        f"elapsed={format_duration(elapsed)}; eta={format_duration(remaining * average)}"
+                    ),
+                )
         manifest["status"] = "completed"
         manifest["completed_at"] = utc_now()
         manifest["predictions_sha256"] = sha256_file(output_dir / "predictions.jsonl")
         manifest["hardware"] = gpu_hardware()
         atomic_write_json(output_dir / "manifest.json", manifest)
+        log_progress(
+            "evaluate",
+            (
+                f"complete: {completed_count}/{total_predictions} predictions saved to "
+                f"{output_dir / 'predictions.jsonl'}"
+            ),
+        )
+    except KeyboardInterrupt:
+        manifest["status"] = "interrupted"
+        manifest["completed_predictions"] = completed_count
+        manifest["updated_at"] = utc_now()
+        atomic_write_json(output_dir / "manifest.json", manifest)
+        log_progress(
+            "evaluate",
+            f"interrupted after {completed_count}/{total_predictions}; rerun the same command to resume",
+        )
+        raise
     except Exception as error:
         manifest["status"] = "failed"
         manifest["error"] = "".join(traceback.format_exception_only(error))
         manifest["updated_at"] = utc_now()
         atomic_write_json(output_dir / "manifest.json", manifest)
+        log_progress("evaluate", f"failed after {completed_count}/{total_predictions}: {error}")
         raise
 
 

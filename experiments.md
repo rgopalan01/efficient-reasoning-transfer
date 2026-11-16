@@ -41,3 +41,19 @@ This file records observations and decisions chronologically. Do not rewrite old
 - No GPU experiment or scientific result has been produced by this update.
 - CPU verification after this update: 33 non-GPU tests passed; the CUDA integration test remains
   intentionally deselected locally.
+
+## 2026-11-15 — Colab progress and interruption visibility
+
+- Added immediate progress lines for dataset generation, model loading, every evaluation
+  completion, training setup and optimization, calibration decisions, bootstrap comparisons, and
+  figure rendering.
+- Evaluation now reports completed/total predictions, remaining predictions, token count,
+  correctness, finish reason, item latency, elapsed time, and estimated time remaining after every
+  saved completion.
+- Evaluation manifests now retain total and completed prediction counts. A keyboard interruption is
+  recorded explicitly and the same command can resume from atomically saved predictions.
+- TRL progress display is explicitly enabled for GRPO steps; these messages do not change seeds,
+  sampling, rewards, datasets, or scientific comparisons.
+- The first attempted GPU probe downloaded and loaded the pinned model but was interrupted before
+  a completed evaluation was established. It is not scientific evidence and does not alter the
+  predeclared calibration protocol.

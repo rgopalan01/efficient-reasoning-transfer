@@ -10,7 +10,14 @@ from typing import Any
 import numpy as np
 import yaml
 
-from .utils import atomic_write_json, atomic_write_yaml, read_jsonl, sha256_file, utc_now
+from .utils import (
+    atomic_write_json,
+    atomic_write_yaml,
+    log_progress,
+    read_jsonl,
+    sha256_file,
+    utc_now,
+)
 
 
 def recommend_budget(
@@ -316,12 +323,17 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
+    log_progress("calibrate", f"starting {args.command} decision")
     if args.command == "budget":
         report = budget_report(args)
     elif args.command == "gamma":
         report = gamma_report(args)
     else:
         report = protocol_report(args)
+    log_progress(
+        "calibrate",
+        f"{args.command} decision complete: status={report.get('status', 'written')}",
+    )
     print(json.dumps(report, indent=2))
 
 
