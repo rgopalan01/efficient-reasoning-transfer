@@ -121,8 +121,12 @@ python -m effreason.evaluate \
 ```
 
 The extension imports non-truncated predictions, recomputes their reward components for the new
-budget, and regenerates only truncated predictions with their original prompt and seed. Each new
-completion must reproduce the exact saved source-length token-ID prefix or the run is rejected.
+budget, and continues only truncated predictions from their saved completion prefix. The saved
+text is retokenized with the pinned tokenizer and must reproduce both the exact source token count
+and SHA-256 token-ID hash before generation continues. This avoids assuming that a stochastic GPU
+replay will reproduce the same sampled prefix while preserving the observed response as immutable
+evidence. The continuation uses a deterministic, recorded seed offset rather than restarting the
+original random-number stream.
 The Colab decision cell performs this follow-up automatically and recalibrates using only budget
 candidates not already ruled out by truncation.
 

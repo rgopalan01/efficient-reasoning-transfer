@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from effreason.evaluate import _prepare_extension_source, _verify_extension_prefix
+from effreason.evaluate import (
+    _continuation_seed,
+    _prepare_extension_source,
+    _recover_extension_prefix,
+)
 from effreason.utils import (
     atomic_write_json,
     atomic_write_jsonl,
@@ -101,7 +105,7 @@ def test_extension_reuses_only_nontruncated_predictions(tmp_path):
         condition="initial_budget_probe_8",
     )
     assert info["extension_reused_predictions"] == 1
-    assert info["extension_regenerated_predictions"] == 1
+    assert info["extension_continued_predictions"] == 1
     assert len(reused) == 1
     assert reused[0]["example_id"] == "a"
     assert reused[0]["run_id"] == "extended"
@@ -112,11 +116,21 @@ def test_extension_reuses_only_nontruncated_predictions(tmp_path):
 def test_extension_prefix_requires_exact_saved_token_prefix(tmp_path):
     _, _, _, _, rows = _extension_fixture(tmp_path)
     source_row = rows[1]
-    assert _verify_extension_prefix([4, 5, 6, 7, 8, 9], source_row) == 4
-    with pytest.raises(ValueError, match="did not reproduce"):
-        _verify_extension_prefix([4, 5, 0, 7, 8], source_row)
-    with pytest.raises(ValueError, match="ended"):
-        _verify_extension_prefix([4, 5, 6], source_row)
+
+    class Tokenizer:
+        def __init__(self, ids):
+            self.ids = ids
+
+        def encode(self, _text, *, add_special_tokens):
+            assert add_special_tokens is False
+            return self.ids
+
+    source_row["raw_completion"] = "saved output"
+    assert _recover_extension_prefix(Tokenizer([4, 5, 6, 7]), source_row) == [4, 5, 6, 7]
+    with pytest.raises(ValueError, match="token hash"):
+        _recover_extension_prefix(Tokenizer([4, 5, 0, 7]), source_row)
+    with pytest.raises(ValueError, match="round-trip"):
+        _recover_extension_prefix(Tokenizer([4, 5, 6]), source_row)
 
 
 def test_extension_rejects_changed_seed(tmp_path):
@@ -132,3 +146,8 @@ def test_extension_rejects_changed_seed(tmp_path):
             output_run_id="extended",
             condition="initial_budget_probe_8",
         )
+
+
+def test_extension_continuation_seed_is_deterministic_and_distinct():
+    assert _continuation_seed(101) == _continuation_seed(101)
+    assert _continuation_seed(101) != 101

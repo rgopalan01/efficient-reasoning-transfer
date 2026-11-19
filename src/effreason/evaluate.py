@@ -37,6 +37,8 @@ from .utils import (
     utc_now,
 )
 
+CONTINUATION_SEED_OFFSET = 1_000_000_007
+
 
 def _resume_state(
     output_dir: Path,
@@ -70,6 +72,7 @@ def _resume_state(
     }
     existing["status"] = "started"
     existing["updated_at"] = utc_now()
+    existing.pop("error", None)
     return existing, predictions, completed
 
 
@@ -77,25 +80,30 @@ def _prediction_key(row: dict[str, Any]) -> tuple[str, int]:
     return str(row["example_id"]), int(row["sample_id"])
 
 
-def _verify_extension_prefix(
-    completion_ids: list[int], source_row: dict[str, Any]
-) -> int:
+def _continuation_seed(original_seed: int) -> int:
+    return (int(original_seed) + CONTINUATION_SEED_OFFSET) % (2**63 - 1)
+
+
+def _recover_extension_prefix(tokenizer: Any, source_row: dict[str, Any]) -> list[int]:
     if not bool(source_row.get("truncated", False)):
         raise ValueError("Extension source row is not truncated")
-    prefix_tokens = int(source_row["completion_tokens"])
-    if len(completion_ids) < prefix_tokens:
+    raw_completion = source_row.get("raw_completion")
+    if not isinstance(raw_completion, str) or not raw_completion:
+        raise ValueError("Extension source row has no saved raw completion")
+    completion_ids = list(tokenizer.encode(raw_completion, add_special_tokens=False))
+    expected_tokens = int(source_row["completion_tokens"])
+    if len(completion_ids) != expected_tokens:
         raise ValueError(
-            f"Extended completion ended at {len(completion_ids)} tokens before the "
-            f"{prefix_tokens}-token source prefix"
+            "Saved truncated completion did not round-trip through the pinned tokenizer: "
+            f"expected {expected_tokens} tokens, recovered {len(completion_ids)}"
         )
-    actual = sha256_object(completion_ids[:prefix_tokens])
+    actual = sha256_object(completion_ids)
     expected = str(source_row["completion_ids_sha256"])
     if actual != expected:
         raise ValueError(
-            "Extended completion did not reproduce the saved truncated token prefix; "
-            "refusing to mix nondeterministic predictions"
+            "Saved truncated completion token hash does not match its source record"
         )
-    return prefix_tokens
+    return completion_ids
 
 
 def _prepare_extension_source(
@@ -190,8 +198,14 @@ def _prepare_extension_source(
         "extension_source_budget": source_budget,
         "extension_target_budget": target_budget,
         "extension_reused_predictions": len(reused),
-        "extension_regenerated_predictions": len(truncated),
-        "extension_prefix_verification": "sha256 of exact source-length token ID prefix",
+        "extension_continued_predictions": len(truncated),
+        "extension_method": "conditioned continuation from saved truncated completion",
+        "extension_continuation_seed_rule": (
+            f"(original evaluation seed + {CONTINUATION_SEED_OFFSET}) mod (2^63 - 1)"
+        ),
+        "extension_prefix_verification": (
+            "retokenize saved raw completion and verify exact token count and sha256"
+        ),
     }
     return info, reused, truncated
 
@@ -284,6 +298,10 @@ def run_evaluation(args: argparse.Namespace) -> None:
         )
         expected_manifest.update(extension_info)
     manifest, predictions, completed = _resume_state(output_dir, expected_manifest)
+    if extension_source_dir is not None:
+        # Upgrade a failed manifest created by the older replay-based extension method.
+        manifest.pop("extension_regenerated_predictions", None)
+        manifest.update(extension_info)
     if extension_reused:
         existing_by_key: dict[tuple[str, int], dict[str, Any]] = {}
         for row in predictions:
@@ -329,7 +347,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
             "evaluate",
             (
                 f"targeted extension: reused={len(extension_reused)}, "
-                f"to_regenerate={len(extension_truncated)}, source={extension_source_dir}"
+                f"to_continue={len(extension_truncated)}, source={extension_source_dir}"
             ),
         )
     if completed_count == total_predictions:
@@ -373,27 +391,43 @@ def run_evaluation(args: argparse.Namespace) -> None:
                         f"example={record.example_id[:12]}"
                     ),
                 )
+                source_row = extension_truncated.get((record.example_id, sample_id))
+                extension_fields: dict[str, Any] = {}
+                prefix_ids: list[int] | None = None
+                generation_seed = base_seed + record_index * samples + sample_id
+                if extension_source_dir is not None:
+                    if source_row is None:
+                        raise ValueError(
+                            "Targeted extension attempted to continue a non-truncated source key"
+                        )
+                    prefix_ids = _recover_extension_prefix(tokenizer, source_row)
+                    log_progress(
+                        "evaluate",
+                        f"verified saved {len(prefix_ids)}-token prefix; generating continuation",
+                    )
+                    generation_seed = _continuation_seed(generation_seed)
                 result = generate_completion(
                     model,
                     tokenizer,
                     record.question,
                     config["generation"],
                     prompt_variant=prompt_variant,
-                    seed=base_seed + record_index * samples + sample_id,
+                    seed=generation_seed,
+                    prefix_completion_ids=prefix_ids,
                 )
-                source_row = extension_truncated.get((record.example_id, sample_id))
-                extension_fields: dict[str, Any] = {}
-                if extension_source_dir is not None:
-                    if source_row is None:
-                        raise ValueError(
-                            "Targeted extension attempted to regenerate a non-truncated source key"
-                        )
-                    prefix_tokens = _verify_extension_prefix(result.completion_ids, source_row)
+                if source_row is not None:
                     extension_fields = {
                         "extension_source_run_id": manifest["extension_source_run_id"],
                         "extension_reused_without_regeneration": False,
-                        "extension_prefix_tokens": prefix_tokens,
+                        "extension_method": (
+                            "conditioned_continuation_from_saved_truncated_completion"
+                        ),
+                        "extension_prefix_tokens": len(prefix_ids or []),
                         "extension_prefix_verified": True,
+                        "extension_continuation_tokens": (
+                            result.completion_tokens - len(prefix_ids or [])
+                        ),
+                        "extension_continuation_seed": generation_seed,
                     }
                 score = score_assignment(result.completion, record.characters, record.solution)
                 reward = compute_reward(

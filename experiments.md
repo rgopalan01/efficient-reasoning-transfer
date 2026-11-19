@@ -72,3 +72,15 @@ This file records observations and decisions chronologically. Do not rewrite old
   prefix. Any mismatch rejects the combined run. This is a computational amendment only; sample
   membership, budget thresholds, and the development-only selection rule are unchanged.
 - No 8,192-token follow-up result or final budget had been produced when this amendment was added.
+
+## 2026-11-19 — Censored-response continuation correction
+
+- The first replay-based extension attempt demonstrated why exact stochastic replay is unsafe: the
+  first previously truncated response instead sampled EOS at 3,309 tokens. No replacement
+  prediction was saved.
+- The replay protocol recorded immediately above is therefore superseded. Each saved 4,096-token
+  prefix is retokenized with the pinned tokenizer and must reproduce its exact recorded token count
+  and SHA-256 token-ID hash. The model then samples only the continuation using a deterministic,
+  recorded seed offset.
+- The 68 uncensored rows, sample membership, budget thresholds, and development-only selection rule
+  remain unchanged.

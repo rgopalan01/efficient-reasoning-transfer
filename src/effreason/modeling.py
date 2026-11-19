@@ -132,6 +132,7 @@ def generate_completion(
     *,
     prompt_variant: str,
     seed: int,
+    prefix_completion_ids: list[int] | None = None,
 ) -> GenerationResult:
     torch, *_ = _training_imports()
     prompt = build_prompt(question, variant=prompt_variant)
@@ -148,6 +149,25 @@ def generate_completion(
         torch.cuda.manual_seed_all(seed)
         torch.cuda.reset_peak_memory_stats()
     maximum = int(generation_config["max_new_tokens"])
+    prefix_ids = list(prefix_completion_ids or [])
+    if len(prefix_ids) >= maximum:
+        raise ValueError(
+            f"Completion prefix has {len(prefix_ids)} tokens but the target budget is {maximum}"
+        )
+    if prefix_ids:
+        prefix_tensor = torch.tensor(
+            [prefix_ids], dtype=inputs["input_ids"].dtype, device=inputs["input_ids"].device
+        )
+        inputs["input_ids"] = torch.cat((inputs["input_ids"], prefix_tensor), dim=-1)
+        prefix_attention = torch.ones(
+            (inputs["attention_mask"].shape[0], len(prefix_ids)),
+            dtype=inputs["attention_mask"].dtype,
+            device=inputs["attention_mask"].device,
+        )
+        inputs["attention_mask"] = torch.cat(
+            (inputs["attention_mask"], prefix_attention), dim=-1
+        )
+    remaining = maximum - len(prefix_ids)
     started = time.perf_counter()
     with torch.inference_mode():
         outputs = model.generate(
@@ -156,13 +176,14 @@ def generate_completion(
             temperature=float(generation_config["temperature"]),
             top_p=float(generation_config["top_p"]),
             top_k=int(generation_config["top_k"]),
-            max_new_tokens=maximum,
+            max_new_tokens=remaining,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
     latency = time.perf_counter() - started
     prompt_length = int(inputs["input_ids"].shape[-1])
-    completion_ids = outputs[0, prompt_length:].tolist()
+    generated_ids = outputs[0, prompt_length:].tolist()
+    completion_ids = prefix_ids + generated_ids
     eos_id = tokenizer.eos_token_id
     ended_with_eos = bool(completion_ids and eos_id is not None and completion_ids[-1] == eos_id)
     truncated = len(completion_ids) >= maximum and not ended_with_eos
