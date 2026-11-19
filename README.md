@@ -146,7 +146,8 @@ python -m effreason.train \
   --phase pilot \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/accuracy_seed11_pilot
+  --output runs/accuracy_seed11_pilot \
+  --resume auto
 
 python -m effreason.train \
   --config configs/efficiency.yaml \
@@ -154,7 +155,8 @@ python -m effreason.train \
   --gamma 0.1 \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/efficiency_g01_seed11_pilot
+  --output runs/efficiency_g01_seed11_pilot \
+  --resume auto
 
 python -m effreason.train \
   --config configs/efficiency.yaml \
@@ -162,7 +164,8 @@ python -m effreason.train \
   --gamma 0.2 \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/efficiency_g02_seed11_pilot
+  --output runs/efficiency_g02_seed11_pilot \
+  --resume auto
 
 python -m effreason.train \
   --config configs/efficiency.yaml \
@@ -170,7 +173,8 @@ python -m effreason.train \
   --gamma 0.4 \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/efficiency_g04_seed11_pilot
+  --output runs/efficiency_g04_seed11_pilot \
+  --resume auto
 ```
 
 Evaluate the accuracy adapter and all three efficiency adapters with the same `B`, passing the
@@ -222,6 +226,13 @@ report every accepted family, TRL reports every configured training step, and an
 each bootstrap comparison and figure. Interrupting evaluation preserves all atomically written
 predictions; rerun the identical command to resume them.
 
+Pilot training saves a complete Trainer checkpoint after every optimization step. Every notebook
+training command uses `--resume auto`: it resumes the highest valid `checkpoint-N`, starts at step
+0 only when no completed checkpoint exists, and skips a completed run after verifying the final
+adapter hash. An incomplete run refuses to restart without an explicit resume request, preventing
+accidental loss of training progress. At most the currently unfinished step is lost when a runtime
+stops. The two newest checkpoints are retained to limit Drive usage while preserving a fallback.
+
 ```bash
 python -m effreason.analyze \
   --run-dirs runs/accuracy_seed11_test runs/efficiency_seed11_test \
@@ -234,7 +245,11 @@ For two or more matched runs, analysis also emits a reproducibly selected, condi
 
 ## Reproducibility and limitations
 
-Run manifests capture configuration and dataset hashes, package versions, model revision, timestamps, Git state, hardware, and status. Complete training checkpoints retain trainer/optimizer/scheduler/RNG state; an exported adapter alone is not a resumable training checkpoint.
+Run manifests capture configuration and dataset hashes, package versions, model revision,
+timestamps, Git state, hardware, and status. Complete training checkpoints retain
+trainer/optimizer/scheduler/RNG state; an exported adapter alone is not a resumable training
+checkpoint. Colab runtime-local model caches and Python variables do not survive a runtime reset,
+so setup may download the base model again and rerun the lightweight decision cells.
 
 The current training dependencies are bounded provisional ranges. After the first successful A100 save/reload/resume smoke test, export one verified Colab lock and record CUDA, driver, GPU, and storage measurements. Do not describe a dependency file as verified before that test.
 

@@ -98,3 +98,16 @@ This file records observations and decisions chronologically. Do not rewrite old
 - Gamma selection still chooses the smallest of 0.1, 0.2, and 0.4 meeting the predeclared accuracy,
   premise-accuracy, and token-reduction thresholds. Only the selected gamma may proceed to the main
   experiment; test data remains untouched.
+
+## 2026-11-19 — Pilot interruption safety
+
+- Before pilot training began, change the accuracy and efficiency training configurations from
+  checkpoint-at-step-5 to checkpoint-after-every-step. This may add storage and checkpoint-writing
+  overhead but limits a runtime interruption to the currently unfinished step. Retain the two newest
+  checkpoints for a fallback without keeping all five.
+- Training commands now use `--resume auto`, validate configuration and dataset identity, resume the
+  numerically highest complete Trainer checkpoint, and verify and skip an already-completed adapter.
+  An incomplete output directory cannot be silently restarted without a resume request.
+- Place accuracy, gamma 0.1, gamma 0.2, and gamma 0.4 training in separate Colab cells. Evaluation
+  remains response-level resumable through atomic predictions. No scientific thresholds, seeds,
+  data, rewards, or model settings changed.

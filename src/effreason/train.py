@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 import traceback
 from collections import Counter
@@ -168,7 +169,70 @@ def _write_status(path: Path, manifest: dict[str, Any], status: str, error: str 
     manifest["updated_at"] = utc_now()
     if error:
         manifest["error"] = error
+    else:
+        manifest.pop("error", None)
     atomic_write_json(path, manifest)
+
+
+def _checkpoint_step(path: Path) -> int | None:
+    match = re.fullmatch(r"checkpoint-(\d+)", path.name)
+    state_path = path / "trainer_state.json"
+    if match is None or not path.is_dir() or not state_path.is_file():
+        return None
+    step = int(match.group(1))
+    try:
+        with state_path.open(encoding="utf-8") as stream:
+            state = json.load(stream)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return step if int(state.get("global_step", -1)) == step else None
+
+
+def _latest_checkpoint(checkpoints_dir: Path) -> Path | None:
+    candidates = [
+        (step, path)
+        for path in checkpoints_dir.glob("checkpoint-*")
+        if (step := _checkpoint_step(path)) is not None
+    ]
+    return max(candidates, default=(None, None), key=lambda item: item[0])[1]
+
+
+def _resolve_resume_checkpoint(requested: str | None, checkpoints_dir: Path) -> Path | None:
+    if requested is None:
+        return None
+    if requested.casefold() == "auto":
+        return _latest_checkpoint(checkpoints_dir)
+    checkpoint = Path(requested).resolve()
+    if checkpoint.parent != checkpoints_dir.resolve():
+        raise ValueError(f"Resume checkpoint must be inside {checkpoints_dir.resolve()}")
+    if _checkpoint_step(checkpoint) is None:
+        raise ValueError(f"Not a valid trainer checkpoint: {checkpoint}")
+    return checkpoint
+
+
+def _load_existing_training_manifest(
+    manifest_path: Path,
+    expected: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not manifest_path.is_file():
+        return None
+    with manifest_path.open(encoding="utf-8") as stream:
+        existing = json.load(stream)
+    comparable = (
+        "run_id",
+        "run_type",
+        "condition",
+        "phase",
+        "seed",
+        "config_hash",
+        "dataset_hash",
+        "base_model",
+        "prompt_hash",
+    )
+    for field in comparable:
+        if existing.get(field) != expected.get(field):
+            raise ValueError(f"Cannot reuse training output: manifest field {field!r} changed")
+    return existing
 
 
 def _validate_main_inputs(resolved: Any) -> None:
@@ -205,7 +269,6 @@ def run_training(args: argparse.Namespace) -> None:
         return
     output_dir = resolve_path(resolved.path, config["artifacts"]["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write_yaml(output_dir / "config.resolved.yaml", config)
     manifest_path = output_dir / "manifest.json"
     project_dir = resolved.path.parent.parent
     data_manifest_path = resolve_path(
@@ -220,7 +283,7 @@ def run_training(args: argparse.Namespace) -> None:
             f"{config['training']['num_generations']}"
         ),
     )
-    manifest: dict[str, Any] = {
+    expected_manifest: dict[str, Any] = {
         "schema_version": "1",
         "run_id": output_dir.name,
         "run_type": "training",
@@ -235,7 +298,44 @@ def run_training(args: argparse.Namespace) -> None:
         "status": "started",
         "environment": environment_manifest(project_dir),
     }
-    atomic_write_json(manifest_path, manifest)
+    existing_manifest = _load_existing_training_manifest(manifest_path, expected_manifest)
+    if existing_manifest is not None and existing_manifest.get("status") == "completed":
+        adapter_dir = output_dir / "adapter"
+        if not adapter_dir.is_dir():
+            raise ValueError("Completed training manifest exists but the final adapter is missing")
+        recorded_adapter_hash = existing_manifest.get("adapter_hash")
+        if not recorded_adapter_hash or sha256_path(adapter_dir) != recorded_adapter_hash:
+            raise ValueError("Completed training adapter does not match its manifest hash")
+        log_progress(
+            "train",
+            f"run is already complete; verified adapter under {adapter_dir}; no model load required",
+        )
+        return
+    if existing_manifest is not None and args.resume is None:
+        raise ValueError(
+            "An incomplete training run already exists. Pass '--resume auto' to preserve its "
+            "latest checkpoint, or choose a new output directory."
+        )
+    atomic_write_yaml(output_dir / "config.resolved.yaml", config)
+    manifest = existing_manifest or expected_manifest
+    if existing_manifest is not None:
+        manifest["resume_count"] = int(manifest.get("resume_count", 0)) + 1
+        manifest["resumed_at"] = utc_now()
+    _write_status(manifest_path, manifest, "started")
+    checkpoints_dir = output_dir / "checkpoints"
+    resume_checkpoint = _resolve_resume_checkpoint(args.resume, checkpoints_dir)
+    if resume_checkpoint is not None and existing_manifest is None:
+        raise ValueError(
+            "A checkpoint exists without its training manifest; refusing an unverified resume"
+        )
+    if args.resume is not None:
+        if resume_checkpoint is None:
+            log_progress("train", "no completed checkpoint found; starting from step 0")
+        else:
+            manifest["resume_checkpoint"] = str(resume_checkpoint)
+            manifest["resume_checkpoint_step"] = _checkpoint_step(resume_checkpoint)
+            atomic_write_json(manifest_path, manifest)
+            log_progress("train", f"resuming from {resume_checkpoint}")
     try:
         setup_started = time.perf_counter()
         log_progress("train", "loading training libraries")
@@ -274,6 +374,7 @@ def run_training(args: argparse.Namespace) -> None:
             gradient_accumulation_steps=int(training["gradient_accumulation_steps"]),
             gradient_checkpointing=bool(training["gradient_checkpointing"]),
             save_steps=int(training.get("save_steps", 5)),
+            save_total_limit=int(training.get("save_total_limit", 2)),
             logging_steps=int(training.get("logging_steps", 1)),
             warmup_ratio=float(training.get("warmup_ratio", 0.0)),
             max_grad_norm=float(training.get("max_grad_norm", 1.0)),
@@ -309,7 +410,9 @@ def run_training(args: argparse.Namespace) -> None:
             ),
         )
         training_started = time.perf_counter()
-        trainer.train(resume_from_checkpoint=args.resume)
+        trainer.train(
+            resume_from_checkpoint=str(resume_checkpoint) if resume_checkpoint is not None else None
+        )
         log_progress(
             "train",
             f"optimization complete after {format_duration(time.perf_counter() - training_started)}",
@@ -328,7 +431,7 @@ def run_training(args: argparse.Namespace) -> None:
         _write_status(manifest_path, manifest, "interrupted")
         log_progress(
             "train",
-            "interrupted; rerun with --resume pointing to the latest saved checkpoint",
+            "interrupted; rerun the same command with '--resume auto'",
         )
         raise
     except Exception as error:

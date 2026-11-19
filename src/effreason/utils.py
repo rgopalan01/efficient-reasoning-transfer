@@ -52,6 +52,7 @@ CONFIG_SCHEMA: dict[str, set[str]] = {
         "per_device_train_batch_size",
         "gradient_accumulation_steps",
         "save_steps",
+        "save_total_limit",
         "logging_steps",
         "warmup_ratio",
         "max_grad_norm",
@@ -273,6 +274,10 @@ def validate_config(config: Mapping[str, Any], *, allow_main: bool = False) -> N
     )
     if effective_batch % generations:
         raise ConfigError("Effective prompt batch must be divisible by training.num_generations")
+    if int(config["training"].get("save_steps", 1)) <= 0:
+        raise ConfigError("training.save_steps must be positive")
+    if int(config["training"].get("save_total_limit", 1)) <= 0:
+        raise ConfigError("training.save_total_limit must be positive")
     variants = config["data"]["variants_for_splits"]
     if not isinstance(variants, list) or any(v not in {"dev", "test"} for v in variants):
         raise ConfigError("data.variants_for_splits may contain only dev and test")
