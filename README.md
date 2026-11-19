@@ -163,10 +163,19 @@ python -m effreason.train \
   --completion-budget $SELECTED_B \
   --seed 11 \
   --output runs/efficiency_g02_seed11_pilot
+
+python -m effreason.train \
+  --config configs/efficiency.yaml \
+  --phase pilot \
+  --gamma 0.4 \
+  --completion-budget $SELECTED_B \
+  --seed 11 \
+  --output runs/efficiency_g04_seed11_pilot
 ```
 
-Evaluate all three adapters with the same `B`, passing the matching gamma explicitly. The gamma
-selector chooses the smallest candidate that reduces mean tokens by at least 15% on matched
+Evaluate the accuracy adapter and all three efficiency adapters with the same `B`, passing the
+matching gamma explicitly. The gamma selector chooses the smallest candidate that reduces mean
+tokens by at least 15% on matched
 completions that both conditions answered correctly, while keeping overall and changed-premise
 accuracy within five percentage points of the accuracy-only condition. These thresholds are
 predeclared pilot defaults, not post-hoc choices.
@@ -174,7 +183,10 @@ predeclared pilot defaults, not post-hoc choices.
 ```bash
 python -m effreason.calibrate gamma \
   --reference-run runs/accuracy_seed11_pilot_eval \
-  --candidate-runs runs/efficiency_g01_seed11_pilot_eval runs/efficiency_g02_seed11_pilot_eval \
+  --candidate-runs \
+    runs/efficiency_g01_seed11_pilot_eval \
+    runs/efficiency_g02_seed11_pilot_eval \
+    runs/efficiency_g04_seed11_pilot_eval \
   --output analysis/calibration/gamma_decision.json \
   --accuracy-margin-pp 5 \
   --premise-margin-pp 5 \

@@ -84,3 +84,17 @@ This file records observations and decisions chronologically. Do not rewrite old
   recorded seed offset.
 - The 68 uncensored rows, sample membership, budget thresholds, and development-only selection rule
   remain unchanged.
+
+## 2026-11-19 — Gamma pilot range amendment
+
+- Budget calibration selected `B = 8192`: all 72 development completions were correct and
+  non-truncated after the censored-response continuation, with a correct-response p95 of 4,128.3
+  tokens and a 10% headroom requirement of 4,542 tokens.
+- Because reward pressure per token is `gamma / B`, the originally planned gamma values 0.1 and
+  0.2 are weaker under 8,192-token normalization than under the initial 4,096-token probe.
+- Add gamma 0.4 as a third development-only efficiency pilot before any pilot training is run.
+  This supplies a stronger condition while retaining the same completion cap, exact reward formula,
+  selection thresholds, base revision, seed, data, LoRA setup, and five-step pilot duration.
+- Gamma selection still chooses the smallest of 0.1, 0.2, and 0.4 meeting the predeclared accuracy,
+  premise-accuracy, and token-reduction thresholds. Only the selected gamma may proceed to the main
+  experiment; test data remains untouched.
