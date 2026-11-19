@@ -106,6 +106,26 @@ p95, provided the probe truncation rate is at most 2%. Otherwise it explicitly r
 samples or a larger probe. Load `recommended_budget` as `B`, then validate it with a fresh
 development evaluation before training.
 
+When a completed probe requests a larger budget, do not regenerate responses that already ended
+normally. Extend only its truncated keys in a new, fully provenance-tracked run:
+
+```bash
+python -m effreason.evaluate \
+  --config configs/pilot.yaml \
+  --condition initial_budget_extension_8192 \
+  --split dev \
+  --samples-per-example 4 \
+  --completion-budget 8192 \
+  --extend-truncated-from runs/initial_budget_probe \
+  --output runs/initial_budget_extension_8192
+```
+
+The extension imports non-truncated predictions, recomputes their reward components for the new
+budget, and regenerates only truncated predictions with their original prompt and seed. Each new
+completion must reproduce the exact saved source-length token-ID prefix or the run is rejected.
+The Colab decision cell performs this follow-up automatically and recalibrates using only budget
+candidates not already ruled out by truncation.
+
 ```bash
 SELECTED_B=1024  # replace with budget_decision.json recommended_budget
 

@@ -57,3 +57,18 @@ This file records observations and decisions chronologically. Do not rewrite old
 - The first attempted GPU probe downloaded and loaded the pinned model but was interrupted before
   a completed evaluation was established. It is not scientific evidence and does not alter the
   predeclared calibration protocol.
+
+## 2026-11-19 — Censored-response budget follow-up
+
+- The completed 4,096-token development probe contained 72 predictions, including 68 correct,
+  non-truncated predictions and four truncated predictions (5.56% truncation). Its correct,
+  non-truncated p95 was 3,595 tokens and the 10% headroom requirement was 3,955 tokens.
+- Because truncation exceeded the predeclared 2% threshold, 4,096 was rejected and the saved
+  decision requested an 8,192-token follow-up.
+- To avoid needlessly repeating 68 uncensored predictions, the follow-up protocol now reuses those
+  immutable rows and regenerates only the four truncated keys with the same model, prompt, seed,
+  and sampling settings at the larger ceiling.
+- Every regenerated prediction must reproduce the exact SHA-256 hash of its original 4,096-token
+  prefix. Any mismatch rejects the combined run. This is a computational amendment only; sample
+  membership, budget thresholds, and the development-only selection rule are unchanged.
+- No 8,192-token follow-up result or final budget had been produced when this amendment was added.
