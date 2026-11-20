@@ -84,6 +84,8 @@ inspect its decision file before proceeding.
 
 ```bash
 python -m pip install -e '.[train,dev]'
+# Colab's optional torchao 0.10 conflicts with PEFT 0.21; this project does not use TorchAO.
+python -m pip uninstall -y torchao
 python -m effreason.data build --config configs/pilot.yaml
 python -m effreason.data audit --manifest data/generated/pilot/manifest.json
 

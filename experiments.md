@@ -111,3 +111,12 @@ This file records observations and decisions chronologically. Do not rewrite old
 - Place accuracy, gamma 0.1, gamma 0.2, and gamma 0.4 training in separate Colab cells. Evaluation
   remains response-level resumable through atomic predictions. No scientific thresholds, seeds,
   data, rewards, or model settings changed.
+
+## 2026-11-19 — Colab TorchAO environment correction
+
+- The first accuracy-pilot launch failed before adapter attachment, generation, optimization, or a
+  checkpoint because Colab preinstalled `torchao==0.10.0`, which PEFT 0.21.2 rejects as an
+  incompatible optional integration. No training result or scientific evidence was produced.
+- This experiment uses unquantized BF16 LoRA and neither requests nor imports TorchAO functionality.
+  The Colab setup now removes the unused optional TorchAO package after installing project
+  dependencies. Rerunning the same `--resume auto` command safely starts accuracy training at step 0.
