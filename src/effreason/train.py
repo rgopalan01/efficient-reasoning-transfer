@@ -321,6 +321,7 @@ def run_training(args: argparse.Namespace) -> None:
     if existing_manifest is not None:
         manifest["resume_count"] = int(manifest.get("resume_count", 0)) + 1
         manifest["resumed_at"] = utc_now()
+        manifest["environment"] = expected_manifest["environment"]
     _write_status(manifest_path, manifest, "started")
     checkpoints_dir = output_dir / "checkpoints"
     resume_checkpoint = _resolve_resume_checkpoint(args.resume, checkpoints_dir)
