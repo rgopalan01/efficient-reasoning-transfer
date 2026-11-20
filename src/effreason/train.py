@@ -164,6 +164,53 @@ def _training_imports() -> tuple[Any, Any, Any]:
     return Dataset, GRPOConfig, GRPOTrainer
 
 
+def _build_grpo_config(
+    config_class: Any,
+    config: dict[str, Any],
+    checkpoints_dir: Path,
+) -> Any:
+    """Translate the repository's stable training schema to the installed TRL API."""
+    training = config["training"]
+    generation = config["generation"]
+    warmup_ratio = float(training.get("warmup_ratio", 0.0))
+    if not 0.0 <= warmup_ratio < 1.0:
+        raise ValueError("training.warmup_ratio must be in [0, 1)")
+    return config_class(
+        output_dir=str(checkpoints_dir),
+        num_generations=int(training["num_generations"]),
+        max_completion_length=int(generation["max_new_tokens"]),
+        temperature=float(generation["temperature"]),
+        top_p=float(generation["top_p"]),
+        top_k=int(generation["top_k"]),
+        loss_type=training["loss_type"],
+        scale_rewards=training["scale_rewards"],
+        beta=float(training["beta"]),
+        learning_rate=float(training["learning_rate"]),
+        max_steps=int(training["max_steps"]),
+        per_device_train_batch_size=int(training["per_device_train_batch_size"]),
+        gradient_accumulation_steps=int(training["gradient_accumulation_steps"]),
+        gradient_checkpointing=bool(training["gradient_checkpointing"]),
+        save_steps=int(training.get("save_steps", 5)),
+        save_total_limit=int(training.get("save_total_limit", 2)),
+        logging_steps=int(training.get("logging_steps", 1)),
+        # Transformers 5 replaces warmup_ratio with warmup_steps; a float in [0, 1)
+        # retains ratio semantics.
+        warmup_steps=warmup_ratio,
+        max_grad_norm=float(training.get("max_grad_norm", 1.0)),
+        weight_decay=float(training.get("weight_decay", 0.0)),
+        optim=training["optim"],
+        lr_scheduler_type=training["lr_scheduler_type"],
+        epsilon=float(training["epsilon"]),
+        epsilon_high=float(training["epsilon_high"]),
+        mask_truncated_completions=bool(training["mask_truncated_completions"]),
+        seed=int(training.get("seed", config["experiment"]["seed"])),
+        remove_unused_columns=False,
+        report_to="none",
+        bf16=True,
+        disable_tqdm=False,
+    )
+
+
 def _write_status(path: Path, manifest: dict[str, Any], status: str, error: str | None = None) -> None:
     manifest["status"] = status
     manifest["updated_at"] = utc_now()
@@ -341,6 +388,8 @@ def run_training(args: argparse.Namespace) -> None:
         setup_started = time.perf_counter()
         log_progress("train", "loading training libraries")
         dataset_class, grpo_config_class, trainer_class = _training_imports()
+        log_progress("train", "validating the installed TRL training interface")
+        trainer_args = _build_grpo_config(grpo_config_class, config, checkpoints_dir)
         log_progress(
             "train",
             f"loading base model {config['model']['id']} (the first run may download about 8 GB)",
@@ -358,39 +407,6 @@ def run_training(args: argparse.Namespace) -> None:
         atomic_write_json(manifest_path, manifest)
         dataset = dataset_class.from_list(prepare_training_rows(records))
         training = config["training"]
-        generation = config["generation"]
-        trainer_args = grpo_config_class(
-            output_dir=str(output_dir / "checkpoints"),
-            num_generations=int(training["num_generations"]),
-            max_completion_length=int(generation["max_new_tokens"]),
-            temperature=float(generation["temperature"]),
-            top_p=float(generation["top_p"]),
-            top_k=int(generation["top_k"]),
-            loss_type=training["loss_type"],
-            scale_rewards=training["scale_rewards"],
-            beta=float(training["beta"]),
-            learning_rate=float(training["learning_rate"]),
-            max_steps=int(training["max_steps"]),
-            per_device_train_batch_size=int(training["per_device_train_batch_size"]),
-            gradient_accumulation_steps=int(training["gradient_accumulation_steps"]),
-            gradient_checkpointing=bool(training["gradient_checkpointing"]),
-            save_steps=int(training.get("save_steps", 5)),
-            save_total_limit=int(training.get("save_total_limit", 2)),
-            logging_steps=int(training.get("logging_steps", 1)),
-            warmup_ratio=float(training.get("warmup_ratio", 0.0)),
-            max_grad_norm=float(training.get("max_grad_norm", 1.0)),
-            weight_decay=float(training.get("weight_decay", 0.0)),
-            optim=training["optim"],
-            lr_scheduler_type=training["lr_scheduler_type"],
-            epsilon=float(training["epsilon"]),
-            epsilon_high=float(training["epsilon_high"]),
-            mask_truncated_completions=bool(training["mask_truncated_completions"]),
-            seed=int(training.get("seed", config["experiment"]["seed"])),
-            remove_unused_columns=False,
-            report_to="none",
-            bf16=True,
-            disable_tqdm=False,
-        )
         reward_adapter = TrlRewardAdapter(
             budget=int(config["reward"]["completion_budget"]),
             gamma=float(config["reward"]["gamma"]),

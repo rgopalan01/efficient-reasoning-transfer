@@ -120,3 +120,14 @@ This file records observations and decisions chronologically. Do not rewrite old
 - This experiment uses unquantized BF16 LoRA and neither requests nor imports TorchAO functionality.
   The Colab setup now removes the unused optional TorchAO package after installing project
   dependencies. Rerunning the same `--resume auto` command safely starts accuracy training at step 0.
+
+## 2026-11-20 — Transformers 5 warmup interface correction
+
+- The next accuracy-pilot launch successfully loaded the base model and attached LoRA, then failed
+  while constructing `GRPOConfig`: Transformers 5.20.2 replaced the `warmup_ratio` keyword with
+  `warmup_steps`, whose fractional values retain ratio semantics. The failure occurred before the
+  trainer, generation, optimization, or a checkpoint; it produced no scientific result.
+- Keep the repository's stable `warmup_ratio` configuration field and translate it to
+  `warmup_steps` at the TRL boundary. The configured value remains 0.0, so the optimization
+  protocol is unchanged. GRPO configuration is now validated before the model is loaded, allowing
+  future interface errors to fail quickly without incurring model setup time.

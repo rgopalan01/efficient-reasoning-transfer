@@ -5,6 +5,7 @@ import json
 import pytest
 
 from effreason.train import (
+    _build_grpo_config,
     _latest_checkpoint,
     _load_existing_training_manifest,
     _resolve_resume_checkpoint,
@@ -73,3 +74,51 @@ def test_started_status_clears_stale_error(tmp_path):
         saved = json.load(stream)
     assert saved["status"] == "started"
     assert "error" not in saved
+
+
+def test_grpo_config_translates_fractional_warmup_to_transformers_5(tmp_path):
+    captured = {}
+
+    class FakeGRPOConfig:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    config = {
+        "experiment": {"seed": 11},
+        "generation": {
+            "max_new_tokens": 8192,
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20,
+        },
+        "training": {
+            "num_generations": 4,
+            "loss_type": "dr_grpo",
+            "scale_rewards": False,
+            "beta": 0.0,
+            "learning_rate": 5e-6,
+            "max_steps": 5,
+            "per_device_train_batch_size": 4,
+            "gradient_accumulation_steps": 1,
+            "gradient_checkpointing": True,
+            "warmup_ratio": 0.1,
+            "optim": "adamw_torch_fused",
+            "lr_scheduler_type": "linear",
+            "epsilon": 0.2,
+            "epsilon_high": 0.2,
+            "mask_truncated_completions": False,
+        },
+    }
+    _build_grpo_config(FakeGRPOConfig, config, tmp_path / "checkpoints")
+    assert captured["warmup_steps"] == 0.1
+    assert "warmup_ratio" not in captured
+
+
+def test_grpo_config_rejects_invalid_warmup_ratio(tmp_path):
+    config = {
+        "experiment": {"seed": 11},
+        "generation": {},
+        "training": {"warmup_ratio": 1.0},
+    }
+    with pytest.raises(ValueError, match="warmup_ratio"):
+        _build_grpo_config(object, config, tmp_path / "checkpoints")
