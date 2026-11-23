@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +12,7 @@ from effreason.train import (
     _resolve_resume_checkpoint,
     _write_status,
 )
-from effreason.utils import atomic_write_json
+from effreason.utils import atomic_write_json, load_config
 
 
 def _checkpoint(root, step: int, *, complete: bool = True):
@@ -122,3 +123,22 @@ def test_grpo_config_rejects_invalid_warmup_ratio(tmp_path):
     }
     with pytest.raises(ValueError, match="warmup_ratio"):
         _build_grpo_config(object, config, tmp_path / "checkpoints")
+
+
+def test_training_memory_overrides_preserve_effective_batch():
+    config_path = Path(__file__).parents[1] / "configs" / "efficiency.yaml"
+    resolved = load_config(
+        config_path,
+        max_steps=1,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
+    )
+    training = resolved.values["training"]
+    assert training["max_steps"] == 1
+    assert training["per_device_train_batch_size"] == 1
+    assert training["gradient_accumulation_steps"] == 4
+    assert (
+        training["per_device_train_batch_size"]
+        * training["gradient_accumulation_steps"]
+        == training["num_generations"]
+    )

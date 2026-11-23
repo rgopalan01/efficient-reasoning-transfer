@@ -29,7 +29,7 @@ src/effreason/evaluate.py resumable initial/adaptor evaluation
 src/effreason/calibrate.py development-only budget and gamma selection
 src/effreason/analyze.py CPU metrics, clustered uncertainty, and figures
 tests/                focused scientific-integrity tests
-notebooks/colab.ipynb thin, stage-by-stage A100 launcher
+notebooks/colab.ipynb thin, stage-by-stage Colab launcher with an L4 memory preflight
 experiments.md        chronological decisions and run log
 ```
 
@@ -76,7 +76,7 @@ R = exact_accuracy - gamma * completion_tokens / completion_budget
 
 Completion length comes from generated token IDs, includes generated delimiters and EOS when present, and excludes the prompt and padding. The completion budget equals `max_new_tokens` and is fixed within matched comparisons. With `gamma < 1`, any correct response within the cap has higher individual reward than any incorrect response, though optimization can still reduce accuracy.
 
-## A100 calibration and pilot sequence
+## Colab calibration and pilot sequence
 
 Use `notebooks/colab.ipynb` as the authoritative launcher. It stops after development
 calibration and does not expose or launch final test runs. Run each stage independently and
@@ -107,6 +107,11 @@ completions. It recommends the smallest standard cap at or above 110% of the cor
 p95, provided the probe truncation rate is at most 2%. Otherwise it explicitly requests more
 samples or a larger probe. Load `recommended_budget` as `B`, then validate it with a fresh
 development evaluation before training.
+
+When only an L4 is available, run the notebook's one-step memory preflight before pilot training.
+The L4 path uses a per-device microbatch of 1 and four gradient-accumulation steps. Its effective
+batch remains four, matching `num_generations=4`. All accuracy and efficiency adapters must use the
+same batching path; do not compare a prior batch-4 adapter with an L4 adapter.
 
 When a completed probe requests a larger budget, do not regenerate responses that already ended
 normally. Extend only its truncated keys in a new, fully provenance-tracked run:
@@ -148,7 +153,9 @@ python -m effreason.train \
   --phase pilot \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/accuracy_seed11_pilot \
+  --per-device-train-batch-size 1 \
+  --gradient-accumulation-steps 4 \
+  --output runs/accuracy_seed11_pilot_l4 \
   --resume auto
 
 python -m effreason.train \
@@ -157,7 +164,9 @@ python -m effreason.train \
   --gamma 0.1 \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/efficiency_g01_seed11_pilot \
+  --per-device-train-batch-size 1 \
+  --gradient-accumulation-steps 4 \
+  --output runs/efficiency_g01_seed11_pilot_l4 \
   --resume auto
 
 python -m effreason.train \
@@ -166,7 +175,9 @@ python -m effreason.train \
   --gamma 0.2 \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/efficiency_g02_seed11_pilot \
+  --per-device-train-batch-size 1 \
+  --gradient-accumulation-steps 4 \
+  --output runs/efficiency_g02_seed11_pilot_l4 \
   --resume auto
 
 python -m effreason.train \
@@ -175,7 +186,9 @@ python -m effreason.train \
   --gamma 0.4 \
   --completion-budget $SELECTED_B \
   --seed 11 \
-  --output runs/efficiency_g04_seed11_pilot \
+  --per-device-train-batch-size 1 \
+  --gradient-accumulation-steps 4 \
+  --output runs/efficiency_g04_seed11_pilot_l4 \
   --resume auto
 ```
 
@@ -188,11 +201,11 @@ predeclared pilot defaults, not post-hoc choices.
 
 ```bash
 python -m effreason.calibrate gamma \
-  --reference-run runs/accuracy_seed11_pilot_eval \
+  --reference-run runs/accuracy_seed11_pilot_l4_eval \
   --candidate-runs \
-    runs/efficiency_g01_seed11_pilot_eval \
-    runs/efficiency_g02_seed11_pilot_eval \
-    runs/efficiency_g04_seed11_pilot_eval \
+    runs/efficiency_g01_seed11_pilot_l4_eval \
+    runs/efficiency_g02_seed11_pilot_l4_eval \
+    runs/efficiency_g04_seed11_pilot_l4_eval \
   --output analysis/calibration/gamma_decision.json \
   --accuracy-margin-pp 5 \
   --premise-margin-pp 5 \

@@ -292,6 +292,9 @@ def load_config(
     samples_per_example: int | None = None,
     output_dir: str | None = None,
     seed: int | None = None,
+    max_steps: int | None = None,
+    per_device_train_batch_size: int | None = None,
+    gradient_accumulation_steps: int | None = None,
     allow_main: bool = False,
 ) -> ResolvedConfig:
     config_path = Path(path).resolve()
@@ -317,6 +320,20 @@ def load_config(
         config["experiment"]["seed"] = int(seed)
         config["training"]["seed"] = int(seed)
         config["evaluation"]["seed"] = int(seed)
+    if max_steps is not None:
+        if max_steps <= 0:
+            raise ConfigError("max_steps must be positive")
+        config["training"]["max_steps"] = int(max_steps)
+    if per_device_train_batch_size is not None:
+        if per_device_train_batch_size <= 0:
+            raise ConfigError("per_device_train_batch_size must be positive")
+        config["training"]["per_device_train_batch_size"] = int(per_device_train_batch_size)
+    if gradient_accumulation_steps is not None:
+        if gradient_accumulation_steps <= 0:
+            raise ConfigError("gradient_accumulation_steps must be positive")
+        config["training"]["gradient_accumulation_steps"] = int(
+            gradient_accumulation_steps
+        )
     validate_config(config, allow_main=allow_main)
     return ResolvedConfig(config_path, config, sha256_object(config))
 

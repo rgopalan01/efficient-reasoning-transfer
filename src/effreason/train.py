@@ -307,6 +307,9 @@ def run_training(args: argparse.Namespace) -> None:
         completion_budget=args.completion_budget,
         output_dir=args.output,
         seed=args.seed,
+        max_steps=args.max_steps,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         allow_main=args.allow_main,
     )
     config = resolved.values
@@ -465,6 +468,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--completion-budget", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--output")
+    parser.add_argument("--max-steps", type=int)
+    parser.add_argument("--per-device-train-batch-size", type=int)
+    parser.add_argument("--gradient-accumulation-steps", type=int)
     parser.add_argument("--resume")
     parser.add_argument("--allow-main", action="store_true")
     parser.add_argument("--dry-run", action="store_true")

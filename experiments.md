@@ -131,3 +131,18 @@ This file records observations and decisions chronologically. Do not rewrite old
   `warmup_steps` at the TRL boundary. The configured value remains 0.0, so the optimization
   protocol is unchanged. GRPO configuration is now validated before the model is loaded, allowing
   future interface errors to fail quickly without incurring model setup time.
+
+## 2026-11-23 — L4 microbatch preflight
+
+- Colab repeatedly allocated an NVIDIA L4 with approximately 24 GB rather than an A100. The
+  batch-4 GRPO configuration exhausted device memory before the first efficiency update. No
+  efficiency adapter or scientific result was produced by that attempt.
+- Before changing the pinned model, add a one-step efficiency memory preflight with
+  `per_device_train_batch_size=1` and `gradient_accumulation_steps=4`. This retains an effective
+  batch of four, `num_generations=4`, the 8,192-token ceiling, reward, decoding, and LoRA settings.
+- If the preflight succeeds, rerun the accuracy control and every efficiency pilot under this same
+  batching configuration using distinct `_l4` run directories. Retain the earlier batch-4 accuracy
+  run only as provenance and exclude it from matched comparisons. Stage 1 budget calibration and
+  baseline evaluation remain valid because neither depends on the training microbatch schedule.
+- If the preflight fails, do not silently reduce the completion cap or mix configurations; record
+  the failure before considering a smaller base model and repeating model-dependent calibration.
