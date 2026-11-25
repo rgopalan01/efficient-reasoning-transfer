@@ -191,3 +191,19 @@ This file records observations and decisions chronologically. Do not rewrite old
 - This correction was made during development before budget selection, adapter training, protocol
   selection, frozen test creation, or final-test access. It changes neither gold answers nor the
   parser, reward, model, precision, sampling settings, or selection thresholds.
+
+## 2026-11-25 — Nonredundant budget-evidence gate
+
+- The completed prompt-v2 probe produced 72 responses directly at 4,096 tokens, with 69 correct,
+  non-truncated responses, zero truncations, a correct-response p95 of 1,992 tokens, and a
+  headroom requirement of 2,192 tokens. The predeclared candidate rule selected `B = 4096`, equal
+  to the actual probe cap.
+- A second 36-response run at the identical cap, model, prompt, development records, and sampling
+  policy would not test a newly selected cap and would consume GPU time without resolving an
+  observed uncertainty. Reuse the completed probe as the budget evidence and baseline source.
+- Generalize the notebook rather than special-casing this result: reuse a completed source only
+  when selected budget equals source budget and source truncation is within the predeclared 2%
+  threshold. If the selected cap differs, retain the fresh validation run and the same stopping
+  rule.
+- This changes no prediction, threshold, budget, reward, model, training setting, or held-out data.
+  It only removes redundant inference before the one-step training preflight.

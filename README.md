@@ -94,8 +94,9 @@ Run the notebook in order:
    verify CUDA memory.
 2. Run a single-response inference preflight with `--max-records 1`; the notebook requires a
    strictly valid `<answer>...</answer>` block before allowing calibration to begin.
-3. Collect the 72-response development budget probe, select and validate `B`, and extend only
-   censored responses if the 2% truncation rule requires a larger cap.
+3. Collect the 72-response development budget probe and select `B`. When the selected cap is the
+   probe cap and truncation already passes, reuse the probe as budget evidence; otherwise run fresh
+   validation. Extend only censored responses if the 2% rule requires a larger cap.
 4. Run a one-step GRPO memory preflight using microbatch 1 and four accumulation steps.
 5. Train fresh accuracy-only and gamma 0.1, 0.2, and 0.4 five-step pilots from the same base
    revision.
@@ -109,6 +110,11 @@ provided probe truncation is at most 2%. The gamma selector chooses the smallest
 reduces tokens by at least 15% on matched jointly-correct responses while keeping overall and
 changed-premise accuracy within five percentage points of the accuracy-only condition. A null
 decision stops the workflow rather than tuning on test data.
+
+The budget evidence gate avoids redundant GPU inference: a completed probe is sufficient when it
+was generated at the selected cap and already passes the truncation threshold. Fresh validation is
+reserved for a cap not directly tested by the selected source run. Baseline analysis is computed
+from whichever run the gate selects.
 
 Evaluation saves every response atomically and resumes an identical command by prediction key.
 Training saves after every optimization step and uses `--resume auto`. A disconnected runtime may
