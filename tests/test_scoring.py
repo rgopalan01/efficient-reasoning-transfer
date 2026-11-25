@@ -5,12 +5,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from effreason.scoring import compute_reward, parse_final_answer, score_assignment
+from effreason.scoring import build_prompt, compute_reward, parse_final_answer, score_assignment
 from effreason.train import TrlRewardAdapter, compute_batch_rewards, prepare_training_rows
 
 NAMES = ["Alice", "Bob"]
 CHARACTERS = {"role_0": "Alice", "role_1": "Bob"}
 SOLUTION = {"role_0": True, "role_1": False}
+
+
+def test_prompt_explicitly_rejects_bare_json_and_requires_literal_tags():
+    prompt = build_prompt("Puzzle text")
+    assert "bare JSON without both tags is invalid" in prompt
+    assert "literal opening tag <answer>" in prompt
+    assert "end the response immediately after </answer>" in prompt
 
 
 def test_native_qwen_closing_boundary_is_valid_without_opening_tag():
@@ -117,4 +124,6 @@ def test_training_rows_use_conversational_format_for_native_chat_template():
     )
     row = prepare_training_rows([record])[0]
     assert row["prompt"][0]["role"] == "user"
-    assert row["prompt"][0]["content"].endswith("include every name exactly once and no other keys.")
+    assert row["prompt"][0]["content"].endswith(
+        "end the response immediately after </answer>."
+    )

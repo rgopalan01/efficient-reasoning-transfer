@@ -7,9 +7,12 @@ from typing import Any
 
 ANSWER_PATTERN = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.IGNORECASE | re.DOTALL)
 OUTPUT_INSTRUCTION = (
-    "Solve the puzzle. End your response with exactly one <answer>...</answer> block. Inside "
-    'it, write one valid JSON object mapping every puzzle name to "knight" or "knave"; '
-    "include every name exactly once and no other keys."
+    "Solve the puzzle. After finishing your reasoning, output exactly one final "
+    "<answer>...</answer> block. The literal opening tag <answer> and literal closing tag "
+    "</answer> are mandatory; bare JSON without both tags is invalid. Inside the tags, write "
+    'one valid JSON object mapping every puzzle name to "knight" or "knave"; include every '
+    "name exactly once and no other keys. Place the block after your reasoning and end the "
+    "response immediately after </answer>."
 )
 CONCISE_INSTRUCTION = "Reason as concisely as possible while preserving correctness."
 

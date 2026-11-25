@@ -84,14 +84,16 @@ Completion length comes from generated token IDs, includes generated delimiters 
 
 Use `notebooks/colab.ipynb` as the authoritative launcher. It uses `configs/t4_*.yaml`, the pinned
 1.7B revision, and FP16 for both inference and training. FP16 does not change if Colab happens to
-allocate an L4 or A100. All new artifacts are isolated below `runs/qwen3_1_7b_t4/` and
-`analysis/qwen3_1_7b_t4/`; never copy the 4B budget, gamma, adapter, or evaluation into this lineage.
+allocate an L4 or A100. The strict-format prompt-v2 artifacts are isolated below
+`runs/qwen3_1_7b_t4_prompt_v2/` and `analysis/qwen3_1_7b_t4_prompt_v2/`; never copy the 4B or
+pre-amendment 1.7B budget, gamma, adapter, or evaluation into this lineage.
 
 Run the notebook in order:
 
 1. Clone/update the repository, install dependencies, audit the deterministic puzzle data, and
    verify CUDA memory.
-2. Run a single-response inference preflight with `--max-records 1`.
+2. Run a single-response inference preflight with `--max-records 1`; the notebook requires a
+   strictly valid `<answer>...</answer>` block before allowing calibration to begin.
 3. Collect the 72-response development budget probe, select and validate `B`, and extend only
    censored responses if the 2% truncation rule requires a larger cap.
 4. Run a one-step GRPO memory preflight using microbatch 1 and four accumulation steps.

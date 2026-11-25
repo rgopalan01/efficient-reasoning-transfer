@@ -173,3 +173,21 @@ This file records observations and decisions chronologically. Do not rewrite old
   deselected; all three T4 configurations dry-ran without importing the GPU stack; and the revised
   notebook parsed as valid JSON. No 1.7B weights were downloaded and no T4 result was fabricated
   locally.
+
+## 2026-11-25 — Qwen3-1.7B strict-format prompt amendment
+
+- The first 1.7B inference preflight and first four budget-probe completions all derived the exact
+  correct assignment for the same development puzzle, but emitted bare JSON after `</think>` rather
+  than the required literal `<answer>...</answer>` wrapper. The strict parser therefore recorded
+  `missing_answer_block`; these are interface failures, not demonstrated reasoning failures.
+- Stop the initial prompt-v1 budget probe after four saved responses. Exclude its preflight and
+  partial probe from calibration, training, gamma selection, and scientific results.
+- Keep the parser and output contract unchanged. Strengthen the shared prompt to state explicitly
+  that both literal tags are mandatory, bare JSON is invalid, the answer block follows reasoning,
+  and the response ends immediately after `</answer>`.
+- Version every revised artifact below `runs/qwen3_1_7b_t4_prompt_v2/` and
+  `analysis/qwen3_1_7b_t4_prompt_v2/`. The notebook now refuses to begin the 72-response probe unless
+  the one-response preflight both completes and passes strict parsing.
+- This correction was made during development before budget selection, adapter training, protocol
+  selection, frozen test creation, or final-test access. It changes neither gold answers nor the
+  parser, reward, model, precision, sampling settings, or selection thresholds.

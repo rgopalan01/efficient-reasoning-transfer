@@ -69,4 +69,4 @@ analysis:
   accuracy_margin_pp: 5.0
   seed: 17
 artifacts:
-  output_dir: runs/qwen3_1_7b_t4/efficiency_seed11_pilot
+  output_dir: runs/qwen3_1_7b_t4_prompt_v2/efficiency_seed11_pilot
