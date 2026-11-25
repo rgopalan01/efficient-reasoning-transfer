@@ -62,6 +62,7 @@ def _resume_state(
         "extension_source_run_id",
         "extension_source_predictions_sha256",
         "extension_source_budget",
+        "max_records",
     ]
     for key in comparable:
         if existing.get(key) != expected_manifest.get(key):
@@ -242,6 +243,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
                     "prompt_variant": prompt_variant,
                     "adapter": adapter,
                     "samples_per_example": config["evaluation"]["samples_per_example"],
+                    "max_records": args.max_records,
                     "extend_truncated_from": args.extend_truncated_from,
                 }
             )
@@ -249,10 +251,16 @@ def run_evaluation(args: argparse.Namespace) -> None:
         return
     if not args.output:
         raise ValueError("--output is required unless --dry-run is used")
+    if args.max_records is not None and args.max_records <= 0:
+        raise ValueError("--max-records must be positive")
+    if args.max_records is not None and args.extend_truncated_from:
+        raise ValueError("--max-records cannot be combined with --extend-truncated-from")
     data_path = resolve_path(
         resolved.path, config["data"].get("eval_manifest") or config["data"]["manifest"]
     )
     data_manifest, records = load_manifest_records(data_path, split)
+    if args.max_records is not None:
+        records = records[: args.max_records]
     samples = int(config["evaluation"]["samples_per_example"])
     if config["experiment"]["phase"] == "main" and split in {"test", "test_harder"}:
         if not data_manifest.get("frozen", False):
@@ -279,6 +287,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
         "dataset_hash": data_manifest["dataset_hash"],
         "data_manifest": str(data_path),
         "base_model": config["model"],
+        "max_records": args.max_records,
         "prompt_hash": sha256_text(build_prompt("<QUESTION>", variant=prompt_variant)),
         "started_at": utc_now(),
         "status": "started",
@@ -363,7 +372,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
         load_started = time.perf_counter()
         log_progress(
             "evaluate",
-            f"loading {config['model']['id']} (the first run may download about 8 GB)",
+            f"loading {config['model']['id']} (the first run downloads the pinned weights)",
         )
         model, tokenizer = load_policy(config["model"], adapter_path=adapter)
         log_progress(
@@ -532,6 +541,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--gamma", type=float)
     parser.add_argument("--completion-budget", type=int)
     parser.add_argument("--samples-per-example", type=int)
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        help="Evaluate only the first N records (intended for hardware preflights)",
+    )
     parser.add_argument("--split", default="dev", choices=["train", "dev", "test", "test_harder"])
     parser.add_argument("--prompt-variant", choices=["standard", "concise"])
     parser.add_argument("--output")

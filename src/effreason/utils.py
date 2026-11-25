@@ -253,8 +253,10 @@ def validate_config(config: Mapping[str, Any], *, allow_main: bool = False) -> N
         raise ConfigError("Main runs require an explicit --allow-main acknowledgement")
     if phase == "main" and "RESOLVE" in str(config["model"]["revision"]).upper():
         raise ConfigError("Main runs require a pinned model revision")
+    if config["model"]["dtype"] not in {"bfloat16", "float16"}:
+        raise ConfigError("model.dtype must be 'bfloat16' or 'float16'")
     if config["model"]["quantization"] != "none":
-        raise ConfigError("Version 1 supports only unquantized BF16 LoRA")
+        raise ConfigError("Version 1 supports only unquantized LoRA")
     if config["adapter"]["method"] != "lora":
         raise ConfigError("Version 1 supports only LoRA adapters")
     if config["training"]["loss_type"] != "dr_grpo":

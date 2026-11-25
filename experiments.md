@@ -146,3 +146,30 @@ This file records observations and decisions chronologically. Do not rewrite old
   baseline evaluation remain valid because neither depends on the training microbatch schedule.
 - If the preflight fails, do not silently reduce the completion cap or mix configurations; record
   the failure before considering a smaller base model and repeating model-dependent calibration.
+
+## 2026-11-25 — T4 protocol amendment
+
+- Constraint discovered before any main training or held-out final-test evaluation: future Colab
+  access can reliably provide only an NVIDIA T4. The 4B BF16 protocol is therefore not the final
+  experimental lineage.
+- Preserve all completed `Qwen/Qwen3-4B-Thinking-2507` L4 runs as feasibility-pilot provenance.
+  The completed accuracy and gamma pilots may inform engineering, but their budget, adapters, and
+  development measurements are excluded from the revised comparison.
+- Start a fresh T4-compatible lineage using `Qwen/Qwen3-1.7B` at exact revision
+  `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`, unquantized FP16 rank-16 LoRA, four generations,
+  microbatch 1, and four gradient-accumulation steps. FP16 remains fixed if a different CUDA GPU is
+  allocated later.
+- Repeat every model-dependent development decision: one-response inference preflight, 72-response
+  budget probe, budget validation, one-step training preflight, matched accuracy and gamma pilots,
+  development evaluation, and gamma selection. Reusing the deterministic puzzle manifest is
+  permitted because puzzle generation is model-independent.
+- Store revised artifacts only below `runs/qwen3_1_7b_t4/` and
+  `analysis/qwen3_1_7b_t4/`. Configuration and analysis guards must reject cross-model or
+  cross-precision comparisons.
+- No QLoRA, SFT, reward change, decoding change, hidden bonus, or final-test access is introduced.
+  Main sample sizes, steps, seeds, frozen test data, and scientific results remain deferred until
+  this revised development calibration completes.
+- Local amendment validation: Ruff passed; 49 non-GPU tests passed with one CUDA integration test
+  deselected; all three T4 configurations dry-ran without importing the GPU stack; and the revised
+  notebook parsed as valid JSON. No 1.7B weights were downloaded and no T4 result was fabricated
+  locally.

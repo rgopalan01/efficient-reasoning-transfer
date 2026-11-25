@@ -175,6 +175,9 @@ def _build_grpo_config(
     warmup_ratio = float(training.get("warmup_ratio", 0.0))
     if not 0.0 <= warmup_ratio < 1.0:
         raise ValueError("training.warmup_ratio must be in [0, 1)")
+    dtype = str(config["model"]["dtype"])
+    if dtype not in {"bfloat16", "float16"}:
+        raise ValueError("GRPO training requires model.dtype to be bfloat16 or float16")
     return config_class(
         output_dir=str(checkpoints_dir),
         num_generations=int(training["num_generations"]),
@@ -206,7 +209,8 @@ def _build_grpo_config(
         seed=int(training.get("seed", config["experiment"]["seed"])),
         remove_unused_columns=False,
         report_to="none",
-        bf16=True,
+        bf16=dtype == "bfloat16",
+        fp16=dtype == "float16",
         disable_tqdm=False,
     )
 
@@ -395,7 +399,7 @@ def run_training(args: argparse.Namespace) -> None:
         trainer_args = _build_grpo_config(grpo_config_class, config, checkpoints_dir)
         log_progress(
             "train",
-            f"loading base model {config['model']['id']} (the first run may download about 8 GB)",
+            f"loading base model {config['model']['id']} (the first run downloads the pinned weights)",
         )
         model, tokenizer = load_policy(config["model"])
         log_progress(

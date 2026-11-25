@@ -43,6 +43,18 @@ def load_tokenizer(model_config: dict[str, Any]) -> Any:
     return tokenizer
 
 
+def _resolve_torch_dtype(torch: Any, dtype_name: str) -> Any:
+    mapping = {
+        "bfloat16": "bfloat16",
+        "float16": "float16",
+        "float32": "float32",
+    }
+    attribute = mapping.get(str(dtype_name))
+    if attribute is None:
+        raise ValueError(f"Unsupported model dtype: {dtype_name!r}")
+    return getattr(torch, attribute)
+
+
 def load_policy(
     model_config: dict[str, Any], *, adapter_path: str | Path | None = None
 ) -> tuple[Any, Any]:
@@ -65,9 +77,18 @@ def load_policy(
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    dtype_name = str(model_config["dtype"])
+    if (
+        dtype_name == "bfloat16"
+        and torch.cuda.is_available()
+        and not torch.cuda.is_bf16_supported()
+    ):
+        raise RuntimeError(
+            "This configuration requires BF16, but the selected CUDA GPU does not support it"
+        )
     load_kwargs: dict[str, Any] = {
         "revision": model_config["revision"],
-        "dtype": torch.bfloat16,
+        "dtype": _resolve_torch_dtype(torch, dtype_name),
         "device_map": "auto",
     }
     attention = model_config.get("attention_implementation")
@@ -209,6 +230,7 @@ def gpu_hardware() -> dict[str, Any]:
         "device": properties.name,
         "vram_bytes": properties.total_memory,
         "cuda_version": torch.version.cuda,
+        "bf16_supported": torch.cuda.is_bf16_supported(),
         "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
         "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
     }

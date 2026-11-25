@@ -86,6 +86,7 @@ def test_grpo_config_translates_fractional_warmup_to_transformers_5(tmp_path):
 
     config = {
         "experiment": {"seed": 11},
+        "model": {"dtype": "float16"},
         "generation": {
             "max_new_tokens": 8192,
             "temperature": 0.6,
@@ -113,6 +114,8 @@ def test_grpo_config_translates_fractional_warmup_to_transformers_5(tmp_path):
     _build_grpo_config(FakeGRPOConfig, config, tmp_path / "checkpoints")
     assert captured["warmup_steps"] == 0.1
     assert "warmup_ratio" not in captured
+    assert captured["fp16"] is True
+    assert captured["bf16"] is False
 
 
 def test_grpo_config_rejects_invalid_warmup_ratio(tmp_path):

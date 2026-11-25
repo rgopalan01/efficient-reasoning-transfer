@@ -16,6 +16,7 @@ from .utils import (
     log_progress,
     read_jsonl,
     sha256_file,
+    sha256_object,
     utc_now,
 )
 
@@ -204,6 +205,15 @@ def _load_evaluation_run(path: Path) -> tuple[dict[str, Any], dict[str, Any], li
     return manifest, config, rows
 
 
+def _gamma_comparison_signature(config: dict[str, Any]) -> str:
+    normalized = json.loads(json.dumps(config))
+    normalized["experiment"].pop("name", None)
+    normalized["experiment"].pop("condition", None)
+    normalized["reward"].pop("gamma", None)
+    normalized["artifacts"].pop("output_dir", None)
+    return sha256_object(normalized)
+
+
 def budget_report(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).resolve()
     manifest, config, rows = _load_evaluation_run(run_dir)
@@ -231,7 +241,8 @@ def budget_report(args: argparse.Namespace) -> dict[str, Any]:
 
 def gamma_report(args: argparse.Namespace) -> dict[str, Any]:
     reference_path = Path(args.reference_run).resolve()
-    reference_manifest, _, reference_rows = _load_evaluation_run(reference_path)
+    reference_manifest, reference_config, reference_rows = _load_evaluation_run(reference_path)
+    reference_signature = _gamma_comparison_signature(reference_config)
     candidate_data: list[tuple[float, list[dict[str, Any]], str]] = []
     source_runs: list[dict[str, Any]] = []
     for raw_path in args.candidate_runs:
@@ -240,6 +251,10 @@ def gamma_report(args: argparse.Namespace) -> dict[str, Any]:
         for field in ("dataset_hash", "split", "prompt_variant"):
             if manifest.get(field) != reference_manifest.get(field):
                 raise ValueError(f"Candidate {path} differs on {field}")
+        if _gamma_comparison_signature(config) != reference_signature:
+            raise ValueError(
+                f"Candidate {path} differs in model, precision, generation, or training settings"
+            )
         gamma = float(config["reward"]["gamma"])
         candidate_data.append((gamma, rows, path.name))
         source_runs.append(

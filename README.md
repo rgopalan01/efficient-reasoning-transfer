@@ -2,12 +2,16 @@
 
 This repository tests whether training a reasoning model to use fewer generated tokens preserves its ability to adapt when a familiar logical structure changes.
 
-The experiment compares independently initialized LoRA adapters on `Qwen/Qwen3-4B-Thinking-2507`:
+The authoritative T4 protocol compares independently initialized FP16 LoRA adapters on
+`Qwen/Qwen3-1.7B` at revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`:
 
 1. exact-assignment reward only (`gamma = 0`), and
 2. exact assignment minus a bounded completion-length cost (`0 < gamma < 1`).
 
 Both conditions use the same Knights and Knaves data, prompt schedule, update budget, decoding policy, and evaluation families. Evaluation distinguishes new originals, surface-only changes, answer-changing premise mutations, and harder puzzles.
+
+Earlier `Qwen/Qwen3-4B-Thinking-2507` L4 runs are retained as feasibility-pilot provenance only.
+They are not mixed with the 1.7B budget calibration, gamma selection, training, or evaluation.
 
 ## Cognitive-science framing
 
@@ -20,7 +24,7 @@ The project uses synthetic puzzles and public model weights. It has no human par
 ## Repository layout
 
 ```text
-configs/              complete pilot configurations
+configs/              original 4B configs plus isolated T4/FP16 1.7B configs
 src/effreason/data.py deterministic generation, oracle, variants, audits
 src/effreason/scoring.py strict answer parser and reward contract
 src/effreason/modeling.py lazy model/tokenizer/LoRA loading and generation
@@ -29,7 +33,7 @@ src/effreason/evaluate.py resumable initial/adaptor evaluation
 src/effreason/calibrate.py development-only budget and gamma selection
 src/effreason/analyze.py CPU metrics, clustered uncertainty, and figures
 tests/                focused scientific-integrity tests
-notebooks/colab.ipynb thin, stage-by-stage Colab launcher with an L4 memory preflight
+notebooks/colab.ipynb authoritative stage-by-stage T4 launcher with inference/training preflights
 experiments.md        chronological decisions and run log
 ```
 
@@ -47,11 +51,11 @@ python -m pip install -e '.[dev]'
 
 ruff check .
 pytest -m 'not gpu'
-python -m effreason.data build --config configs/pilot.yaml
+python -m effreason.data build --config configs/t4_pilot.yaml
 python -m effreason.data audit --manifest data/generated/pilot/manifest.json
-python -m effreason.train --config configs/accuracy.yaml --phase pilot --dry-run
-python -m effreason.train --config configs/efficiency.yaml --phase pilot --gamma 0.1 --dry-run
-python -m effreason.evaluate --config configs/pilot.yaml --condition initial --split dev --dry-run
+python -m effreason.train --config configs/t4_accuracy.yaml --phase pilot --dry-run
+python -m effreason.train --config configs/t4_efficiency.yaml --phase pilot --gamma 0.1 --dry-run
+python -m effreason.evaluate --config configs/t4_pilot.yaml --condition initial --split dev --dry-run
 ```
 
 CPU-only imports do not import Torch, Transformers, TRL, PEFT, Accelerate, or Datasets. Dataset records contain solutions and AST metadata, but model prompts receive only the rendered puzzle and the shared output instruction.
@@ -78,148 +82,35 @@ Completion length comes from generated token IDs, includes generated delimiters 
 
 ## Colab calibration and pilot sequence
 
-Use `notebooks/colab.ipynb` as the authoritative launcher. It stops after development
-calibration and does not expose or launch final test runs. Run each stage independently and
-inspect its decision file before proceeding.
+Use `notebooks/colab.ipynb` as the authoritative launcher. It uses `configs/t4_*.yaml`, the pinned
+1.7B revision, and FP16 for both inference and training. FP16 does not change if Colab happens to
+allocate an L4 or A100. All new artifacts are isolated below `runs/qwen3_1_7b_t4/` and
+`analysis/qwen3_1_7b_t4/`; never copy the 4B budget, gamma, adapter, or evaluation into this lineage.
 
-```bash
-python -m pip install -e '.[train,dev]'
-# Colab's optional torchao 0.10 conflicts with PEFT 0.21; this project does not use TorchAO.
-python -m pip uninstall -y torchao
-python -m effreason.data build --config configs/pilot.yaml
-python -m effreason.data audit --manifest data/generated/pilot/manifest.json
+Run the notebook in order:
 
-python -m effreason.evaluate \
-  --config configs/pilot.yaml \
-  --condition initial_budget_probe \
-  --split dev \
-  --samples-per-example 4 \
-  --output runs/initial_budget_probe
-
-python -m effreason.calibrate budget \
-  --run-dir runs/initial_budget_probe \
-  --output analysis/calibration/budget_decision.json \
-  --candidates 512 1024 2048 4096 8192
-```
+1. Clone/update the repository, install dependencies, audit the deterministic puzzle data, and
+   verify CUDA memory.
+2. Run a single-response inference preflight with `--max-records 1`.
+3. Collect the 72-response development budget probe, select and validate `B`, and extend only
+   censored responses if the 2% truncation rule requires a larger cap.
+4. Run a one-step GRPO memory preflight using microbatch 1 and four accumulation steps.
+5. Train fresh accuracy-only and gamma 0.1, 0.2, and 0.4 five-step pilots from the same base
+   revision.
+6. Evaluate all four adapters on the same development items and select gamma using the predeclared
+   accuracy, changed-premise accuracy, and token-reduction thresholds.
+7. Save the selected development protocol and back up the artifacts.
 
 The budget rule requires at least 50 baseline completions and 20 correct, non-truncated
-completions. It recommends the smallest standard cap at or above 110% of the correct-response
-p95, provided the probe truncation rate is at most 2%. Otherwise it explicitly requests more
-samples or a larger probe. Load `recommended_budget` as `B`, then validate it with a fresh
-development evaluation before training.
+completions. It recommends the smallest standard cap at or above 110% of the correct-response p95,
+provided probe truncation is at most 2%. The gamma selector chooses the smallest candidate that
+reduces tokens by at least 15% on matched jointly-correct responses while keeping overall and
+changed-premise accuracy within five percentage points of the accuracy-only condition. A null
+decision stops the workflow rather than tuning on test data.
 
-When only an L4 is available, run the notebook's one-step memory preflight before pilot training.
-The L4 path uses a per-device microbatch of 1 and four gradient-accumulation steps. Its effective
-batch remains four, matching `num_generations=4`. All accuracy and efficiency adapters must use the
-same batching path; do not compare a prior batch-4 adapter with an L4 adapter.
-
-When a completed probe requests a larger budget, do not regenerate responses that already ended
-normally. Extend only its truncated keys in a new, fully provenance-tracked run:
-
-```bash
-python -m effreason.evaluate \
-  --config configs/pilot.yaml \
-  --condition initial_budget_extension_8192 \
-  --split dev \
-  --samples-per-example 4 \
-  --completion-budget 8192 \
-  --extend-truncated-from runs/initial_budget_probe \
-  --output runs/initial_budget_extension_8192
-```
-
-The extension imports non-truncated predictions, recomputes their reward components for the new
-budget, and continues only truncated predictions from their saved completion prefix. The saved
-text is retokenized with the pinned tokenizer and must reproduce both the exact source token count
-and SHA-256 token-ID hash before generation continues. This avoids assuming that a stochastic GPU
-replay will reproduce the same sampled prefix while preserving the observed response as immutable
-evidence. The continuation uses a deterministic, recorded seed offset rather than restarting the
-original random-number stream.
-The Colab decision cell performs this follow-up automatically and recalibrates using only budget
-candidates not already ruled out by truncation.
-
-```bash
-SELECTED_B=1024  # replace with budget_decision.json recommended_budget
-
-python -m effreason.evaluate \
-  --config configs/pilot.yaml \
-  --condition initial_calibrated \
-  --split dev \
-  --samples-per-example 2 \
-  --completion-budget $SELECTED_B \
-  --output runs/initial_calibrated_dev
-
-python -m effreason.train \
-  --config configs/accuracy.yaml \
-  --phase pilot \
-  --completion-budget $SELECTED_B \
-  --seed 11 \
-  --per-device-train-batch-size 1 \
-  --gradient-accumulation-steps 4 \
-  --output runs/accuracy_seed11_pilot_l4 \
-  --resume auto
-
-python -m effreason.train \
-  --config configs/efficiency.yaml \
-  --phase pilot \
-  --gamma 0.1 \
-  --completion-budget $SELECTED_B \
-  --seed 11 \
-  --per-device-train-batch-size 1 \
-  --gradient-accumulation-steps 4 \
-  --output runs/efficiency_g01_seed11_pilot_l4 \
-  --resume auto
-
-python -m effreason.train \
-  --config configs/efficiency.yaml \
-  --phase pilot \
-  --gamma 0.2 \
-  --completion-budget $SELECTED_B \
-  --seed 11 \
-  --per-device-train-batch-size 1 \
-  --gradient-accumulation-steps 4 \
-  --output runs/efficiency_g02_seed11_pilot_l4 \
-  --resume auto
-
-python -m effreason.train \
-  --config configs/efficiency.yaml \
-  --phase pilot \
-  --gamma 0.4 \
-  --completion-budget $SELECTED_B \
-  --seed 11 \
-  --per-device-train-batch-size 1 \
-  --gradient-accumulation-steps 4 \
-  --output runs/efficiency_g04_seed11_pilot_l4 \
-  --resume auto
-```
-
-Evaluate the accuracy adapter and all three efficiency adapters with the same `B`, passing the
-matching gamma explicitly. The gamma selector chooses the smallest candidate that reduces mean
-tokens by at least 15% on matched
-completions that both conditions answered correctly, while keeping overall and changed-premise
-accuracy within five percentage points of the accuracy-only condition. These thresholds are
-predeclared pilot defaults, not post-hoc choices.
-
-```bash
-python -m effreason.calibrate gamma \
-  --reference-run runs/accuracy_seed11_pilot_l4_eval \
-  --candidate-runs \
-    runs/efficiency_g01_seed11_pilot_l4_eval \
-    runs/efficiency_g02_seed11_pilot_l4_eval \
-    runs/efficiency_g04_seed11_pilot_l4_eval \
-  --output analysis/calibration/gamma_decision.json \
-  --accuracy-margin-pp 5 \
-  --premise-margin-pp 5 \
-  --minimum-token-reduction-percent 15
-
-python -m effreason.calibrate protocol \
-  --budget-decision analysis/calibration/budget_decision.json \
-  --gamma-decision analysis/calibration/gamma_decision.json \
-  --output analysis/calibration/selected_protocol.yaml
-```
-
-If no candidate satisfies the rule, the selector records a null decision instead of silently
-choosing the best-looking result. Record the development decision in `experiments.md` before
-creating the main configuration.
+Evaluation saves every response atomically and resumes an identical command by prediction key.
+Training saves after every optimization step and uses `--resume auto`. A disconnected runtime may
+need to reload the model, but completed responses and checkpoints remain in Drive.
 
 Do not pass `--phase main --allow-main` until the protocol, dataset hashes, completion budget, gamma, difficulty, training steps, and seeds have been recorded and the final test data is frozen. The guard is intentional.
 
@@ -266,13 +157,16 @@ trainer/optimizer/scheduler/RNG state; an exported adapter alone is not a resuma
 checkpoint. Colab runtime-local model caches and Python variables do not survive a runtime reset,
 so setup may download the base model again and rerun the lightweight decision cells.
 
-The current training dependencies are bounded provisional ranges. After the first successful A100 save/reload/resume smoke test, export one verified Colab lock and record CUDA, driver, GPU, and storage measurements. Do not describe a dependency file as verified before that test.
+The current training dependencies are bounded provisional ranges. After the first successful T4
+FP16 save/reload/resume smoke test, export one verified Colab lock and record CUDA, driver, GPU,
+and storage measurements. Do not describe a dependency file as verified before that test.
 
 The experiment reduces exact overlap with this fine-tuning dataset; it cannot prove that the pretrained model never encountered related puzzle structures. Preserved transfer is compatible with reusable reasoning but does not prove proceduralization. Failure to detect a meaningful accuracy difference is not evidence of equivalence when intervals are wide.
 
 ## Upstream attribution
 
 - [Reasoning Gym](https://github.com/open-thought/reasoning-gym), Apache-2.0
-- [Qwen3-4B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507), Apache-2.0
+- [Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B), Apache-2.0 (authoritative T4 protocol)
+- [Qwen3-4B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507), Apache-2.0 (earlier feasibility pilot)
 - [Hugging Face TRL](https://huggingface.co/docs/trl/grpo_trainer)
 - [Hugging Face PEFT](https://huggingface.co/docs/peft/developer_guides/lora)

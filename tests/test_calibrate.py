@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from effreason.calibrate import recommend_budget, select_gamma
+from effreason.calibrate import _gamma_comparison_signature, recommend_budget, select_gamma
 
 
 def _row(index: int, *, correct: bool, tokens: int, variant: str = "original", truncated=False):
@@ -63,3 +63,23 @@ def test_gamma_selects_smallest_candidate_that_meets_predeclared_rule():
     )
     assert report["status"] == "selected"
     assert report["selected_gamma"] == pytest.approx(0.1)
+
+
+def test_gamma_signature_rejects_model_or_precision_changes():
+    config = {
+        "experiment": {"name": "accuracy", "condition": "accuracy"},
+        "model": {"id": "model", "revision": "revision", "dtype": "float16"},
+        "reward": {"gamma": 0.0, "completion_budget": 2048},
+        "generation": {"max_new_tokens": 2048},
+        "training": {"num_generations": 4},
+        "artifacts": {"output_dir": "accuracy"},
+    }
+    candidate = {
+        **config,
+        "experiment": {"name": "efficiency", "condition": "efficiency"},
+        "reward": {"gamma": 0.2, "completion_budget": 2048},
+        "artifacts": {"output_dir": "efficiency"},
+    }
+    assert _gamma_comparison_signature(config) == _gamma_comparison_signature(candidate)
+    candidate["model"] = {**candidate["model"], "dtype": "bfloat16"}
+    assert _gamma_comparison_signature(config) != _gamma_comparison_signature(candidate)
