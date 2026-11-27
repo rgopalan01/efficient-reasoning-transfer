@@ -54,7 +54,7 @@ pytest -m 'not gpu'
 python -m effreason.data build --config configs/t4_pilot.yaml
 python -m effreason.data audit --manifest data/generated/pilot/manifest.json
 python -m effreason.train --config configs/t4_accuracy.yaml --phase pilot --dry-run
-python -m effreason.train --config configs/t4_efficiency.yaml --phase pilot --gamma 0.1 --dry-run
+python -m effreason.train --config configs/t4_efficiency.yaml --phase pilot --gamma 0.6 --dry-run
 python -m effreason.evaluate --config configs/t4_pilot.yaml --condition initial --split dev --dry-run
 ```
 
@@ -97,9 +97,11 @@ Run the notebook in order:
 3. Collect the 72-response development budget probe and select `B`. When the selected cap is the
    probe cap and truncation already passes, reuse the probe as budget evidence; otherwise run fresh
    validation. Extend only censored responses if the 2% rule requires a larger cap.
-4. Run a one-step GRPO memory preflight using microbatch 1 and four accumulation steps.
-5. Train fresh accuracy-only and gamma 0.1, 0.2, and 0.4 five-step pilots from the same base
-   revision.
+4. Run a one-step GRPO memory preflight at gamma 0.2 using microbatch 1 and four accumulation
+   steps. This hardware check is not part of gamma selection.
+5. Train fresh, matched 20-step pilots: one accuracy-only control and gamma 0.2, 0.4, and 0.6
+   efficiency conditions from the same base revision. The earlier five-step adapters remain saved
+   as smoke-pilot provenance but are excluded from this comparison.
 6. Evaluate all four adapters on the same development items and select gamma using the predeclared
    accuracy, changed-premise accuracy, and token-reduction thresholds.
 7. Save the selected development protocol and back up the artifacts.

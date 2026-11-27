@@ -207,3 +207,26 @@ This file records observations and decisions chronologically. Do not rewrite old
   rule.
 - This changes no prediction, threshold, budget, reward, model, training setting, or held-out data.
   It only removes redundant inference before the one-step training preflight.
+
+## 2026-11-27 — Longer development pilot and gamma-range amendment
+
+- The matched five-step development evaluation produced no eligible gamma. Relative to the
+  accuracy-only control, the jointly-correct mean completion length increased by 3.62% at gamma
+  0.1, 2.05% at gamma 0.2, and 0.80% at gamma 0.4. All three therefore failed the predeclared 15%
+  reduction threshold; no test data was accessed and no gamma was selected.
+- Training diagnostics show that the length reward is active: all efficiency conditions retained
+  nonzero within-group reward variance and adapter gradients on all five steps. The accuracy-only
+  control reached all-correct groups after its first step, making its later zero gradients expected.
+  These diagnostics motivate testing a longer development exposure rather than attributing the
+  null result to a broken reward implementation.
+- Before further training, replace the five-step comparison with fresh, independently initialized,
+  matched 20-step development pilots: one accuracy-only control and efficiency conditions at gamma
+  0.2, 0.4, and 0.6. Gamma 0.1 is removed because it supplied the weakest pressure in the smoke
+  pilot; gamma 0.6 is added as the predeclared stronger condition. Since 0.6 remains below 1, a
+  correct in-budget completion still has greater scalar reward than an incorrect completion.
+- Do not resume the five-step adapters into the longer comparison: their learning-rate schedule was
+  constructed for a five-step horizon. Preserve them as smoke-pilot provenance and exclude their
+  adapters and evaluations from the 20-step gamma selector.
+- Keep the pinned model and revision, prompt-v2 contract, `B = 4096`, development data, seed 11,
+  FP16 precision, LoRA targets, microbatch and accumulation settings, sampling policy, and selection
+  thresholds unchanged. Continue to stop if none of the longer candidates meets the rule.
