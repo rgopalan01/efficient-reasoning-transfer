@@ -254,3 +254,12 @@ This file records observations and decisions chronologically. Do not rewrite old
 - This is a deliberately bounded course experiment, not a definitive model-training study. The
   single training seed, 20-step update budget, 12 primary test families, and four harder puzzles are
   limitations to report explicitly. All training and evaluation remains checkpointed/resumable.
+
+## 2026-11-27 — Explicit training progress instrumentation
+
+- Add a display-only Trainer callback before main execution. After every optimization step it logs
+  completed/total and remaining steps, current step time, session elapsed time, and a rolling ETA;
+  it also confirms every checkpoint save and reports the final session duration.
+- On checkpoint resume, the counter begins at the restored global step and the ETA uses only work
+  measured in the current runtime. This changes no data, reward, optimizer, schedule, generation,
+  adapter, seed, checkpoint contents, or scientific result.

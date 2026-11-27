@@ -142,9 +142,10 @@ Every prediction retains the raw completion, parsed answer, exact token count, c
 
 Long-running commands emit Colab-friendly progress lines. Evaluation reports every completion with
 completed/total counts, remaining work, token count, latency, elapsed time, and ETA. Dataset builds
-report every accepted family, TRL reports every configured training step, and analysis announces
-each bootstrap comparison and figure. Interrupting evaluation preserves all atomically written
-predictions; rerun the identical command to resume them.
+report every accepted family. Training reports completed/total and remaining steps, current step
+time, session elapsed time, ETA, checkpoint saves, and TRL reward metrics after every update.
+Analysis announces each bootstrap comparison and figure. Interrupting evaluation preserves all
+atomically written predictions; rerun the identical command to resume them.
 
 Training saves a complete Trainer checkpoint after every optimization step. Every notebook
 training command uses `--resume auto`: it resumes the highest valid `checkpoint-N`, starts at step

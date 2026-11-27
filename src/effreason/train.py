@@ -155,13 +155,89 @@ class TrlRewardAdapter:
         return rewards
 
 
-def _training_imports() -> tuple[Any, Any, Any]:
+def _training_imports() -> tuple[Any, Any, Any, Any]:
     try:
         from datasets import Dataset
+        from transformers import TrainerCallback
         from trl import GRPOConfig, GRPOTrainer
     except ImportError as error:
         raise RuntimeError("Install the training dependencies with 'pip install -e .[train]'") from error
-    return Dataset, GRPOConfig, GRPOTrainer
+    return Dataset, GRPOConfig, GRPOTrainer, TrainerCallback
+
+
+def _make_progress_callback(
+    callback_base: type,
+    *,
+    total_steps: int,
+    clock: Any = time.perf_counter,
+) -> Any:
+    """Create a lazy Transformers callback with explicit Colab-friendly step progress."""
+
+    class ColabProgressCallback(callback_base):
+        def __init__(self) -> None:
+            self._training_started: float | None = None
+            self._step_started: float | None = None
+            self._initial_step = 0
+
+        def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            del args, control, kwargs
+            self._training_started = clock()
+            self._initial_step = int(state.global_step)
+            remaining = max(total_steps - self._initial_step, 0)
+            log_progress(
+                "train",
+                (
+                    f"progress initialized: completed={self._initial_step}/{total_steps}; "
+                    f"remaining={remaining}"
+                ),
+            )
+
+        def on_step_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            del args, state, control, kwargs
+            self._step_started = clock()
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            del args, control, kwargs
+            now = clock()
+            completed = int(state.global_step)
+            remaining = max(total_steps - completed, 0)
+            session_steps = max(completed - self._initial_step, 1)
+            session_elapsed = (
+                now - self._training_started if self._training_started is not None else 0.0
+            )
+            average_step_time = session_elapsed / session_steps
+            step_time = now - self._step_started if self._step_started is not None else 0.0
+            log_progress(
+                "train",
+                (
+                    f"completed step {completed}/{total_steps}; remaining={remaining}; "
+                    f"step_time={format_duration(step_time)}; "
+                    f"session_elapsed={format_duration(session_elapsed)}; "
+                    f"eta={format_duration(average_step_time * remaining)}"
+                ),
+            )
+
+        def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            del args, control, kwargs
+            log_progress(
+                "train",
+                f"checkpoint saved after step {int(state.global_step)}/{total_steps}",
+            )
+
+        def on_train_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            del args, control, kwargs
+            elapsed = (
+                clock() - self._training_started if self._training_started is not None else 0.0
+            )
+            log_progress(
+                "train",
+                (
+                    f"training loop finished at step {int(state.global_step)}/{total_steps}; "
+                    f"session_elapsed={format_duration(elapsed)}"
+                ),
+            )
+
+    return ColabProgressCallback()
 
 
 def _build_grpo_config(
@@ -394,7 +470,7 @@ def run_training(args: argparse.Namespace) -> None:
     try:
         setup_started = time.perf_counter()
         log_progress("train", "loading training libraries")
-        dataset_class, grpo_config_class, trainer_class = _training_imports()
+        dataset_class, grpo_config_class, trainer_class, callback_base = _training_imports()
         log_progress("train", "validating the installed TRL training interface")
         trainer_args = _build_grpo_config(grpo_config_class, config, checkpoints_dir)
         log_progress(
@@ -426,11 +502,17 @@ def run_training(args: argparse.Namespace) -> None:
             args=trainer_args,
             train_dataset=dataset,
         )
+        trainer.add_callback(
+            _make_progress_callback(
+                callback_base,
+                total_steps=int(training["max_steps"]),
+            )
+        )
         log_progress(
             "train",
             (
-                f"starting GRPO: {training['max_steps']} steps; TRL will report step progress "
-                "and metrics below"
+                f"starting GRPO: {training['max_steps']} steps; explicit step timing, ETA, "
+                "checkpoint progress, and TRL metrics will appear below"
             ),
         )
         training_started = time.perf_counter()

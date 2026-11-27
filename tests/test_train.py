@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from effreason.train import (
     _build_grpo_config,
     _latest_checkpoint,
     _load_existing_training_manifest,
+    _make_progress_callback,
     _resolve_resume_checkpoint,
     _write_status,
 )
@@ -75,6 +77,28 @@ def test_started_status_clears_stale_error(tmp_path):
         saved = json.load(stream)
     assert saved["status"] == "started"
     assert "error" not in saved
+
+
+def test_training_progress_callback_reports_resume_eta_and_checkpoint(capsys):
+    times = iter([100.0, 101.0, 111.0, 115.0])
+    callback = _make_progress_callback(object, total_steps=20, clock=lambda: next(times))
+    state = SimpleNamespace(global_step=5)
+
+    callback.on_train_begin(None, state, None)
+    callback.on_step_begin(None, state, None)
+    state.global_step = 6
+    callback.on_step_end(None, state, None)
+    callback.on_save(None, state, None)
+    callback.on_train_end(None, state, None)
+
+    output = capsys.readouterr().out
+    assert "progress initialized: completed=5/20; remaining=15" in output
+    assert "completed step 6/20; remaining=14" in output
+    assert "step_time=10s" in output
+    assert "session_elapsed=11s" in output
+    assert "eta=2m 34s" in output
+    assert "checkpoint saved after step 6/20" in output
+    assert "training loop finished at step 6/20; session_elapsed=15s" in output
 
 
 def test_grpo_config_translates_fractional_warmup_to_transformers_5(tmp_path):
