@@ -6,6 +6,7 @@ import pytest
 
 from effreason.data import (
     _make_record,
+    _parser,
     audit_manifest,
     canonical_structure,
     evaluate_statement,
@@ -17,6 +18,14 @@ from effreason.utils import atomic_write_json, atomic_write_jsonl, sha256_file, 
 
 TT0 = ("telling-truth", 0)
 TT1 = ("telling-truth", 1)
+
+
+def test_main_data_build_accepts_explicit_acknowledgement_flag():
+    args = _parser().parse_args(
+        ["build", "--config", "configs/t4_main_accuracy.yaml", "--allow-main"]
+    )
+    assert args.command == "build"
+    assert args.allow_main is True
 
 
 @pytest.mark.parametrize(

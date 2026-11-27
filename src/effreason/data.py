@@ -682,6 +682,7 @@ def _parser() -> argparse.ArgumentParser:
     build = subparsers.add_parser("build")
     build.add_argument("--config", required=True)
     build.add_argument("--force", action="store_true")
+    build.add_argument("--allow-main", action="store_true")
     audit = subparsers.add_parser("audit")
     audit.add_argument("--manifest", required=True)
     freeze = subparsers.add_parser("freeze")
@@ -693,7 +694,7 @@ def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
     if args.command == "build":
         log_progress("data", f"loading configuration {args.config}")
-        resolved = load_config(args.config)
+        resolved = load_config(args.config, allow_main=args.allow_main)
         records, rejections = build_records(resolved.values)
         manifest_path = write_dataset(
             resolved.path, resolved.values, records, rejections, force=args.force

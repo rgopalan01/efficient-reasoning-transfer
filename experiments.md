@@ -230,3 +230,27 @@ This file records observations and decisions chronologically. Do not rewrite old
 - Keep the pinned model and revision, prompt-v2 contract, `B = 4096`, development data, seed 11,
   FP16 precision, LoRA targets, microbatch and accumulation settings, sampling policy, and selection
   thresholds unchanged. Continue to stop if none of the longer candidates meets the rule.
+
+## 2026-11-27 — Deadline-focused main protocol
+
+- Before starting any 20-step follow-up or accessing final-test predictions, supersede the longer
+  development-pilot amendment above because the course project is due in two days. Spending four
+  matched runs on further gamma selection would displace the actual held-out experiment and report.
+- Fix three independently initialized main conditions in advance: accuracy-only (`gamma = 0`), a
+  moderate efficiency incentive (`gamma = 0.4`), and a stronger incentive (`gamma = 0.6`). Treat
+  gamma as an experimental manipulation rather than selecting a winner after observing test data.
+- Fix seed 11, 20 GRPO steps per condition, `B = 4096`, four generations per prompt, microbatch 1,
+  four accumulation steps, FP16 rank-16 LoRA, the pinned Qwen3-1.7B revision, prompt-v2 wording,
+  sampling settings, and learning-rate schedule. Each condition starts from the same base revision;
+  no pilot adapter initializes a main run.
+- Build a new deterministic main dataset with 24 training families, six development families, 12
+  held-out test families containing original/surface/premise variants, and four harder held-out
+  four-person puzzles. Audit and freeze its manifest before main training. Do not print or inspect
+  test contents before all three conditions are fixed.
+- Use one completion per held-out record: 36 primary responses and four harder responses for each
+  condition, or 120 final responses total. The primary analysis compares both gamma conditions to
+  the accuracy control with puzzle-family clustered intervals; harder transfer is secondary and
+  reported separately.
+- This is a deliberately bounded course experiment, not a definitive model-training study. The
+  single training seed, 20-step update budget, 12 primary test families, and four harder puzzles are
+  limitations to report explicitly. All training and evaluation remains checkpointed/resumable.

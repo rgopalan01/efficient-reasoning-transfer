@@ -5,10 +5,11 @@ This repository tests whether training a reasoning model to use fewer generated 
 The authoritative T4 protocol compares independently initialized FP16 LoRA adapters on
 `Qwen/Qwen3-1.7B` at revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`:
 
-1. exact-assignment reward only (`gamma = 0`), and
-2. exact assignment minus a bounded completion-length cost (`0 < gamma < 1`).
+1. exact-assignment reward only (`gamma = 0`),
+2. exact assignment minus a moderate bounded completion-length cost (`gamma = 0.4`), and
+3. exact assignment minus a stronger bounded completion-length cost (`gamma = 0.6`).
 
-Both conditions use the same Knights and Knaves data, prompt schedule, update budget, decoding policy, and evaluation families. Evaluation distinguishes new originals, surface-only changes, answer-changing premise mutations, and harder puzzles.
+All conditions use the same Knights and Knaves data, prompt schedule, update budget, decoding policy, and evaluation families. Evaluation distinguishes new originals, surface-only changes, answer-changing premise mutations, and harder puzzles.
 
 Earlier `Qwen/Qwen3-4B-Thinking-2507` L4 runs are retained as feasibility-pilot provenance only.
 They are not mixed with the 1.7B budget calibration, gamma selection, training, or evaluation.
@@ -66,7 +67,9 @@ Each JSONL record includes a schema version, stable example/family IDs, variant 
 
 The local oracle enumerates all assignments and implements the exact supported operators. Structural canonicalization checks all role permutations, sorts only genuinely commutative children, and preserves implication direction. The builder rejects cross-family structural collisions; the audit blocks split leakage, non-unique solutions, broken parent links, invalid surface variants, and premise mutations whose answer did not change.
 
-The checked-in pilot configuration deliberately creates a small development dataset. It does not freeze a final test set.
+The pilot configuration creates a small development dataset. The main configurations define a
+separate dataset with 24 training families, 12 held-out paired test families, and four harder
+held-out puzzles. The notebook audits and freezes that manifest before any main training begins.
 
 ## Parser and reward
 
@@ -80,7 +83,7 @@ R = exact_accuracy - gamma * completion_tokens / completion_budget
 
 Completion length comes from generated token IDs, includes generated delimiters and EOS when present, and excludes the prompt and padding. The completion budget equals `max_new_tokens` and is fixed within matched comparisons. With `gamma < 1`, any correct response within the cap has higher individual reward than any incorrect response, though optimization can still reduce accuracy.
 
-## Colab calibration and pilot sequence
+## Colab main-experiment sequence
 
 Use `notebooks/colab.ipynb` as the authoritative launcher. It uses `configs/t4_*.yaml`, the pinned
 1.7B revision, and FP16 for both inference and training. FP16 does not change if Colab happens to
@@ -97,21 +100,21 @@ Run the notebook in order:
 3. Collect the 72-response development budget probe and select `B`. When the selected cap is the
    probe cap and truncation already passes, reuse the probe as budget evidence; otherwise run fresh
    validation. Extend only censored responses if the 2% rule requires a larger cap.
-4. Run a one-step GRPO memory preflight at gamma 0.2 using microbatch 1 and four accumulation
-   steps. This hardware check is not part of gamma selection.
-5. Train fresh, matched 20-step pilots: one accuracy-only control and gamma 0.2, 0.4, and 0.6
-   efficiency conditions from the same base revision. The earlier five-step adapters remain saved
-   as smoke-pilot provenance but are excluded from this comparison.
-6. Evaluate all four adapters on the same development items and select gamma using the predeclared
-   accuracy, changed-premise accuracy, and token-reduction thresholds.
-7. Save the selected development protocol and back up the artifacts.
+4. Reuse a completed prompt-v2 training run as the hardware/trainer preflight, or run one gamma-0.4
+   step if none is available.
+5. Build, audit, and freeze the main dataset without displaying held-out test contents.
+6. Train independently initialized, matched 20-step accuracy-only, gamma-0.4, and gamma-0.6 runs.
+7. Evaluate all three adapters once on the 12 frozen paired test families, then separately on four
+   harder held-out puzzles.
+8. Recompute final metrics and family-clustered intervals from saved predictions, render figures,
+   display the two result summaries, and back up all artifacts.
 
-The budget rule requires at least 50 baseline completions and 20 correct, non-truncated
-completions. It recommends the smallest standard cap at or above 110% of the correct-response p95,
-provided probe truncation is at most 2%. The gamma selector chooses the smallest candidate that
-reduces tokens by at least 15% on matched jointly-correct responses while keeping overall and
-changed-premise accuracy within five percentage points of the accuracy-only condition. A null
-decision stops the workflow rather than tuning on test data.
+The budget rule required at least 50 baseline completions and 20 correct, non-truncated
+completions. It selected `B = 4096`, the smallest standard cap at or above 110% of the
+correct-response p95, with zero probe truncation. The completed five-step gamma sweep produced no
+eligible shortening condition. Under the two-day deadline amendment, gamma 0.4 and 0.6 are fixed
+before final-test access as moderate and strong efficiency conditions; neither is selected using
+the test results.
 
 The budget evidence gate avoids redundant GPU inference: a completed probe is sufficient when it
 was generated at the selected cap and already passes the truncation threshold. Fresh validation is
@@ -122,12 +125,13 @@ Evaluation saves every response atomically and resumes an identical command by p
 Training saves after every optimization step and uses `--resume auto`. A disconnected runtime may
 need to reload the model, but completed responses and checkpoints remain in Drive.
 
-Do not pass `--phase main --allow-main` until the protocol, dataset hashes, completion budget, gamma, difficulty, training steps, and seeds have been recorded and the final test data is frozen. The guard is intentional.
-
-After creating a non-empty final test split and completing the audit, freeze it explicitly:
+Main data construction and training require an explicit acknowledgement, and the training guard
+also requires a frozen manifest with a nonempty test split:
 
 ```bash
-python -m effreason.data freeze --manifest data/generated/main/manifest.json
+python -m effreason.data build --config configs/t4_main_accuracy.yaml --allow-main
+python -m effreason.data audit --manifest data/generated/qwen3_1_7b_t4_main_v1/manifest.json
+python -m effreason.data freeze --manifest data/generated/qwen3_1_7b_t4_main_v1/manifest.json
 ```
 
 Frozen manifests cannot be replaced by `data build --force`. Main training rejects an unfrozen manifest, a missing test split, and the five-step pilot budget.
@@ -142,7 +146,7 @@ report every accepted family, TRL reports every configured training step, and an
 each bootstrap comparison and figure. Interrupting evaluation preserves all atomically written
 predictions; rerun the identical command to resume them.
 
-Pilot training saves a complete Trainer checkpoint after every optimization step. Every notebook
+Training saves a complete Trainer checkpoint after every optimization step. Every notebook
 training command uses `--resume auto`: it resumes the highest valid `checkpoint-N`, starts at step
 0 only when no completed checkpoint exists, and skips a completed run after verifying the final
 adapter hash. An incomplete run refuses to restart without an explicit resume request, preventing
@@ -155,7 +159,7 @@ python -m effreason.analyze \
   --output analysis/main
 ```
 
-Analysis reports counts and exact accuracy, overall and correct-only length summaries, paired surface/premise success, premise adaptation conditional on original success, obsolete-assignment rates, validity diagnostics, and measured token/time cost. Difference intervals resample whole puzzle families with 10,000 bootstrap draws. With only two training seeds, interpret across-seed uncertainty cautiously.
+Analysis reports counts and exact accuracy, overall and correct-only length summaries, paired surface/premise success, premise adaptation conditional on original success, obsolete-assignment rates, validity diagnostics, and measured token/time cost. Difference intervals resample whole puzzle families with 10,000 bootstrap draws. This deadline-focused experiment uses one training seed, so results characterize these runs and do not establish across-seed stability.
 
 For two or more matched runs, analysis also emits a reproducibly selected, condition-blinded `trace_sample.jsonl` and a predeclared `trace_codebook.json`. The labels remain unset until a human codes the traces; the software does not invent qualitative observations.
 
